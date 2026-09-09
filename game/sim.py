@@ -72,8 +72,17 @@ GOODS = {
         # Measured at the old bounds: coal on its floor 26% of province-years, iron and
         # cloth on their ceilings 15%. A clamp reached that often is an operating state,
         # not a backstop, and it flattens exactly the spread the player reads.
-        Good("coal",  "Coal",   6.0, 1.0, 0.6, 0.22, 9.0, 0.90),
-        Good("iron",  "Iron",  14.0, 1.1, 0.7, 0.25, 9.0, 0.94),
+        # A remote coalfield with no way to ship is genuinely near-worthless where it
+        # sits, so the floor has to be low enough for a glut to read as a glut rather
+        # than as a clamp. Highfell and Cauldfell both sit on coal they cannot move.
+        Good("coal",  "Coal",   6.0, 1.0, 0.6, 0.09, 9.0, 0.90),
+        # Iron is concentrated in two provinces and one of them (Highfell) is stranded
+        # behind the worst freight on the map — so national supply is structurally short
+        # of what the surplus formula assumes, and the shortage is real. The ceiling has
+        # to be far enough out that "dear because it cannot get here" reads as a price
+        # rather than as a clamp. This is the stranded-resource story the railway exists
+        # to solve, and it should be legible as one.
+        Good("iron",  "Iron",  14.0, 1.1, 0.7, 0.20, 22.0, 0.94),
         Good("cloth", "Cloth", 20.0, 0.7, 0.5, 0.30, 7.0, 0.92),
         # Pillar 3: war is a second kind of demand on the network, not a die roll.
         # Munitions are the good that makes an army an economic object — it eats
@@ -138,7 +147,10 @@ class Province:
         if good == "coal":
             return self.pop * 0.30 * (0.4 + self.bourgeoisie)
         if good == "iron":
-            return self.pop * 0.14 * (0.3 + self.bourgeoisie)
+            # Iron was scarce and used sparingly in 1650 — nails, tools, a plough share,
+            # not construction. At 0.14 national demand outran what two ironfields could
+            # supply and every province sat on the iron ceiling in 15% of province-years.
+            return self.pop * 0.085 * (0.3 + self.bourgeoisie)
         if good == "munit":
             # A standing army eats munitions every year whether or not it fights, and
             # that upkeep is the continuous drag: it raises demand nationally, which
@@ -153,22 +165,39 @@ def build_world(rng: random.Random) -> list[Province]:
     """One country, eight provinces, deliberately varied so price spreads are readable."""
     P = Province
     provs = [
-        P("cap",   "Aldermarch",  6, 2, 24.0, 0.34, 0.15, True,  0.85,
+        P("cap",   "Aldermarch",  4, 2, 24.0, 0.34, 0.15, True,  0.85,
           {"grain": 8.0, "munit": 3.2,  "cloth": 14.0, "coal": 0.0,  "iron": 2.0}, clergy_strength=0.35, noble_strength=0.20),
-        P("weald", "Weald",       4, 1, 14.0, 0.16, 0.55, True,  0.30,
-          {"munit": 0.0, "grain": 30.0, "cloth": 1.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.55, noble_strength=0.70),
-        P("hollin","Hollinghay",  8, 1, 16.0, 0.13, 0.70, False, 0.22,
+        P("weald", "Weald",       2, 1, 14.0, 0.16, 0.55, True,  0.30,
+          {"munit": 0.0, "grain": 30.0, "cloth": 1.0,  "coal": 0.0,  "iron": 0.8}, clergy_strength=0.55, noble_strength=0.70),
+        P("hollin","Hollinghay",  6, 1, 16.0, 0.13, 0.70, False, 0.22,
           {"munit": 0.0, "grain": 32.0, "cloth": 0.5,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.60, noble_strength=0.75),
-        P("blackm","Blackmoor",   3, 3,  9.0, 0.19, 1.10, False, 0.35,
+        P("blackm","Blackmoor",   2, 3,  9.0, 0.19, 1.10, False, 0.35,
           {"grain": 4.0, "munit": 2.2,  "cloth": 0.0,  "coal": 18.0, "iron": 1.0}, clergy_strength=0.30, noble_strength=0.45),
-        P("ironby","Ironby",      9, 3,  8.0, 0.21, 1.25, False, 0.40,
-          {"grain": 3.5, "munit": 5.0,  "cloth": 0.0,  "coal": 3.0,  "iron": 11.0}, clergy_strength=0.30, noble_strength=0.50),
-        P("stitch","Stitchford",  6, 4, 11.0, 0.28, 0.85, True,  0.60,
-          {"munit": 0.0, "grain": 3.0,  "cloth": 16.0, "coal": 0.0,  "iron": 0.0}, clergy_strength=0.25, noble_strength=0.25),
+        P("ironby","Ironby",      8, 2,  8.0, 0.21, 1.25, False, 0.40,
+          {"grain": 3.5, "munit": 5.0,  "cloth": 0.0,  "coal": 3.0,  "iron": 14.0}, clergy_strength=0.30, noble_strength=0.50),
+        P("stitch","Stitchford",  4, 4, 11.0, 0.28, 0.85, True,  0.60,
+          {"munit": 0.0, "grain": 3.0,  "cloth": 16.0, "coal": 0.0,  "iron": 0.9}, clergy_strength=0.25, noble_strength=0.25),
         P("marsh", "Marshend",    2, 5,  7.0, 0.09, 1.40, True,  0.10,
           {"munit": 0.0, "grain": 13.0,  "cloth": 0.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.70, noble_strength=0.60),
-        P("far",   "Cauldfell",  10, 5,  5.0, 0.05, 2.60, False, 0.03,   # the dark province
+        P("far",   "Cauldfell",  10, 3,  5.0, 0.05, 2.60, False, 0.03,   # the dark province
           {"munit": 0.0, "grain": 6.0,  "cloth": 0.0,  "coal": 2.0,  "iron": 0.0}, clergy_strength=0.75, noble_strength=0.85),
+        # -- the second ring -------------------------------------------------
+        P("north", "Northport",   4, 0, 10.0, 0.31, 0.30, True,  0.66,
+          {"munit": 1.1, "grain": 4.0,  "cloth": 7.0,  "coal": 0.0,  "iron": 0.7}, clergy_strength=0.30, noble_strength=0.25),
+        P("high",  "Highfell",   10, 1,  4.0, 0.07, 2.30, False, 0.09,
+          # A coal province, stranded behind the worst freight on the map. Giving it a
+          # third of the nation's iron as well put that iron out of reach and left every
+          # other province pinned to the iron ceiling in 22% of province-years — the
+          # stranded-resource story reads better on one good than on two.
+          {"munit": 0.0, "grain": 2.0,  "cloth": 0.0,  "coal": 11.0, "iron": 1.5}, clergy_strength=0.65, noble_strength=0.80),
+        P("loam",  "Loam",        0, 4, 12.0, 0.14, 0.75, False, 0.19,
+          {"munit": 0.0, "grain": 26.0, "cloth": 1.0,  "coal": 0.0,  "iron": 0.6}, clergy_strength=0.60, noble_strength=0.72),
+        P("salt",  "Saltmere",    8, 4,  6.0, 0.17, 0.60, True,  0.40,
+          {"munit": 0.0, "grain": 7.0,  "cloth": 2.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.45, noble_strength=0.35),
+        P("dun",   "Dunwick",     0, 2,  5.0, 0.11, 0.55, True,  0.24,
+          {"munit": 0.0, "grain": 5.0,  "cloth": 1.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.55, noble_strength=0.40),
+        P("thorn", "Thornhill",   6, 3,  9.0, 0.22, 1.05, False, 0.46,
+          {"munit": 0.7, "grain": 4.0,  "cloth": 11.0, "coal": 0.0,  "iron": 1.0}, clergy_strength=0.35, noble_strength=0.45),
     ]
     # No province produced literally none of anything. There was a village smith, a
     # weaver at the cottage, someone digging the outcrop. Without a floor, a province
@@ -176,9 +205,12 @@ def build_world(rng: random.Random) -> list[Province]:
     # merchant, so nobody trades to them — holds zero stock forever and its price reads
     # the ceiling every single year. That is a constant, not information, and it was
     # 15.7% of province-years for iron and cloth.
-    for p in provs:
-        for g in GOOD_KEYS:
-            p.capacity[g] = max(p.capacity[g], p.consumption(g) * 0.30)
+    # Per-good local production floor. Normalisation scales total capacity to match
+    # total demand, so a national shortage is impossible by construction — what bites
+    # is DISTRIBUTION, when a good is made in two provinces and needed in fourteen.
+    # Iron is the case: smithing happened everywhere, so its floor is high; coal and
+    # cloth are genuinely regional.
+    LOCAL = {"iron": 0.75, "grain": 0.35, "cloth": 0.30, "coal": 0.18, "munit": 0.30}
 
     # every good's capacity is scaled to the surplus its own carry and target imply
     for g in GOOD_KEYS:
@@ -188,6 +220,10 @@ def build_world(rng: random.Random) -> list[Province]:
             k = need * GOODS[g].surplus / have
             for p in provs:
                 p.capacity[g] *= k
+        # AFTER normalisation, not before: applying the floor first inflates `have`,
+        # so the scaling immediately undoes it and the floor does nothing at all.
+        for p in provs:
+            p.capacity[g] = max(p.capacity[g], p.consumption(g) * LOCAL.get(g, 0.30))
     for p in provs:
         for g in GOOD_KEYS:
             p.industry[g] = 0.0
@@ -1356,7 +1392,8 @@ class Game:
         if self.war_in == 2:
             self.log.append("The neighbour is drilling. Your envoys advise it will be two years.")
         if self.war_in <= 0:
-            need = 1.0 + self.threat * 2.0 + (y - START_YEAR) * 0.055
+            held = sum(1 for p in self.provs if p.key not in self.lost_provinces)
+            need = (1.0 + self.threat * 2.0 + (y - START_YEAR) * 0.055) * (held / 8.0) ** 0.55
             supplied = self._munitions(at_war=True)
             effective = self.army * (0.55 + 0.45 * supplied)
             if supplied < 0.85:
@@ -1367,7 +1404,12 @@ class Game:
                 self.treasury += 120
                 self.holder['estates'].consent = min(1.0, self.holder['estates'].consent + 0.08)
             else:
-                lost = [p for p in self.provs if p.key not in self.lost_provinces][-1]
+                # The frontier is what you cannot hold: the province that costs most to
+                # reach is the one that falls. Taking `provs[-1]` was list order, which
+                # after the map grew meant losing a central textile town to an invasion
+                # from the east.
+                lost = max((p for p in self.provs if p.key not in self.lost_provinces),
+                           key=lambda q: q.freight())
                 self.lost_provinces.append(lost.key)
                 self.log.append(f"WAR. The army was not enough. {lost.name} is ceded.")
                 self._reflood()

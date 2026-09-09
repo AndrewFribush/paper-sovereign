@@ -203,6 +203,25 @@ def build_network(provs):
         ("cap",    "stitch", "rail", 2.0), ("cap",    "blackm", "rail", 3.2),
         ("cap",    "ironby", "rail", 3.2), ("stitch", "marsh", "rail", 4.1),
         ("ironby", "far",    "rail", 2.4),
+        # -- the second ring -------------------------------------------------
+        ("north",  "weald",  "road", 2.1), ("north",  "cap",    "road", 2.6),
+        ("north",  "hollin", "road", 3.0), ("high",   "ironby", "road", 2.2),
+        ("high",   "far",    "road", 2.8), ("high",   "hollin", "road", 3.4),
+        ("loam",   "weald",  "road", 1.9), ("loam",   "blackm", "road", 1.8),
+        ("loam",   "cap",    "road", 2.7), ("loam",   "marsh",  "road", 2.9),
+        ("salt",   "stitch", "road", 2.2), ("salt",   "far",    "road", 3.0),
+        ("salt",   "ironby", "road", 3.4), ("dun",    "marsh",  "road", 2.2),
+        ("dun",    "blackm", "road", 2.4), ("thorn",  "cap",    "road", 1.8),
+        ("thorn",  "stitch", "road", 1.7), ("thorn",  "ironby", "road", 2.6),
+        ("thorn",  "hollin", "road", 2.9), ("thorn",  "blackm", "road", 3.0),
+        # coastwise and river
+        ("north",  "cap",    "river", 2.8), ("dun",    "marsh",  "river", 2.4),
+        ("salt",   "stitch", "river", 2.4), ("loam",   "cap",    "river", 3.0),
+        # the line, where it could go
+        ("north",  "cap",    "rail", 2.6), ("thorn",  "cap",    "rail", 1.8),
+        ("thorn",  "stitch", "rail", 1.7), ("loam",   "cap",    "rail", 2.7),
+        ("high",   "ironby", "rail", 2.2), ("salt",   "stitch", "rail", 2.2),
+        ("dun",    "marsh",  "rail", 2.2),
     ]
     E = [e for e in E if e[0] in P and e[1] in P]
-    return Network(provs, E, ports=("cap", "marsh"))
+    return Network(provs, E, ports=("cap", "marsh", "north", "dun", "salt"))

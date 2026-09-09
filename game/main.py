@@ -110,10 +110,10 @@ class UI:
         self.t("THE COUNTRY", x0, y0, self.f_sm, STALE)
         self.t("as reported", x0 + 120, y0, self.f_sm, BELIEVED)
         self.prov_rects = {}
-        cw, ch = 140, 78
+        cw, ch = 118, 74
         for p in g.provs:
-            gx = x0 + (p.x - 2) * 60
-            gy = y0 + 26 + (p.y - 1) * 92
+            gx = x0 - 6 + p.x * 54
+            gy = y0 + 24 + p.y * 82
             r = pygame.Rect(gx, gy, cw, ch)
             self.prov_rects[p.key] = r
             lost = p.key in g.lost_provinces
@@ -124,35 +124,35 @@ class UI:
                                  (r.right - 6, r.bottom - 5), 3)
             pygame.draw.rect(self.screen, RULE, r, 1, border_radius=3)
             if lost:
-                self.t(p.name, r.x + 8, r.y + 6, self.f_sm, STALE)
-                self.t("ceded", r.x + 8, r.y + 24, self.f_sm, RED)
+                self.t(p.name[:11], r.x + 7, r.y + 5, self.f_sm, STALE)
+                self.t("ceded", r.x + 7, r.y + 22, self.f_sm, RED)
                 continue
-            self.t(p.name, r.x + 8, r.y + 5, self.f, KNOWN)
+            self.t(p.name[:11], r.x + 7, r.y + 4, self.f, KNOWN)
 
             ob = g.beliefs.get_pop(p.key)
             if ob:
                 age = ob.age(g.year)
                 col = BELIEVED if age < 12 else STALE
-                self.t(f"{ob.value*1000:,.0f}", r.x + 8, r.y + 24, self.f_sm, col)
-                self.t(f"{ob.source} {ob.year}", r.x + 8, r.y + 38, self.f_sm, STALE)
+                self.t(f"{ob.value*1000:,.0f}", r.x + 7, r.y + 22, self.f_sm, col)
+                self.t(f"{ob.source[:6]} {ob.year}", r.x + 7, r.y + 36, self.f_sm, STALE)
             else:
-                self.t("numerous", r.x + 8, r.y + 24, self.f_sm, STALE)
+                self.t("numerous", r.x + 7, r.y + 22, self.f_sm, STALE)
 
             pb = g.beliefs.get_price(p.key, "grain")
             if pb:
                 col = RED if pb.value > GOODS["grain"].ref_price * 1.6 else BELIEVED
-                self.t(f"grain {pb.value:,.1f}", r.x + 8, r.y + 53, self.f_sm, col)
+                self.t(f"gr {pb.value:,.1f}", r.x + 7, r.y + 50, self.f_sm, col)
             else:
-                self.t("no return", r.x + 8, r.y + 53, self.f_sm, STALE)
+                self.t("no return", r.x + 7, r.y + 50, self.f_sm, STALE)
 
             ub = g.beliefs.unrest.get(p.key)
             if ub and ub.value > 0.35:
                 pygame.draw.circle(self.screen, RED, (r.right - 12, r.y + 12), 4)
 
             if self.inspector:
-                self.tr(f"{p.pop*1000:,.0f}", r.right - 7, r.y + 24, self.f_sm, TRUTH)
-                self.tr(f"{price_of(p,'grain'):,.1f}", r.right - 7, r.y + 38, self.f_sm, TRUTH)
-                self.tr(f"w{welfare(p):.2f}", r.right - 7, r.y + 53, self.f_sm, TRUTH)
+                self.tr(f"{p.pop*1000:,.0f}", r.right - 6, r.y + 22, self.f_sm, TRUTH)
+                self.tr(f"{price_of(p,'grain'):,.1f}", r.right - 6, r.y + 36, self.f_sm, TRUTH)
+                self.tr(f"w{welfare(p):.2f}", r.right - 6, r.y + 50, self.f_sm, TRUTH)
 
     def spark(self, series, x, y, w, h, col):
         """A price series as the state has it on file. Gaps are gaps."""
