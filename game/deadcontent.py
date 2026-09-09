@@ -75,6 +75,36 @@ def play(style: str, mix: dict, seed: int):
                 overridden=any(h.overridden for h in g.settlement))
 
 
+
+def _responds(line_key: str, link: str) -> float | None:
+    """How much a line's own binding link rises when that line is funded hard,
+    against leaving it alone. Above 1 means the instrument builds its own ceiling."""
+    if link in ("?", "money"):
+        return None
+    def final(fund: bool):
+        vals = []
+        for seed in range(1, 5):
+            g = Game(seed)
+            g.collect()
+            while not g.game_over:
+                if g.crisis:
+                    g.choose(g.crisis.choices[0].key)
+                    continue
+                t = g.treasury
+                for k in g.budget:
+                    g.budget[k] = 0.0
+                g.budget["army"] = t * 0.2
+                if fund:
+                    g.budget[line_key] = t * 0.8
+                g.end_turn(); g.notice = []
+                if not g.game_over:
+                    g.collect()
+            vals.append(g.link_value(line_key, link))
+        return st.mean(vals)
+    base = final(False)
+    return final(True) / base if base > 1e-6 else None
+
+
 def main():
     seeds = range(1, 9)
     all_unlocked, all_crises, all_binds = set(), Counter(), Counter()
@@ -150,8 +180,19 @@ def main():
             # the wrong link.
             mine = [(k, n) for (lk, k), n in all_line_binds.items()
                     if lk == l.key and k != "money"]
-            held = max(mine, key=lambda x: x[1])[0] if mine else "?" 
-            print(f"    {l.name}: peaks at {r*100:.0f}%, held by {held}")
+            held = max(mine, key=lambda x: x[1])[0] if mine else "?"
+            # The question the design actually asks is not "is this constrained" but
+            # "does the player have a move". A ceiling that the line's own funding
+            # raises is a bootstrap, which is the game working. A ceiling that nothing
+            # the player does will move is a dead end wearing a constraint's clothes.
+            lift = _responds(l.key, held)
+            if lift is None:
+                note = ""
+            elif lift > 1.15:
+                note = f"  — but its own funding lifts {held} by {(lift-1)*100:.0f}%, so it bootstraps"
+            else:
+                note = f"  — and nothing the player funds moves {held} ({(lift-1)*100:+.0f}%): a dead end"
+            print(f"    {l.name}: peaks at {r*100:.0f}%, held by {held}{note}")
 
     print("\nWALLPAPER  (a message the player stops reading is worse than none)")
     total_years = len(STYLES) * len(list(seeds)) * 20
