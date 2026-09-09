@@ -619,9 +619,18 @@ class Game:
             if line_key == "normal":  return min(1.0, 0.30 + self.masters * 0.8)
             return 1.0
         if link == "reach":
-            tot = sum(1.0 / p.freight() for p in self.provs)
-            best = sum(1.0 / (p.base_freight * 0.25) for p in self.provs)
-            return max(0.12, min(1.0, (tot / best + self.supplied("reach")) / max(1.0, self.admin_load ** 0.8)))
+            # How much of your country you can actually get to, weighted by where the
+            # people are. The previous form summed 1/freight, which is dominated by the
+            # ports already at the minimum — building the entire rail network moved it
+            # from 0.67 to 0.73, so the design's central claim that a railway transforms
+            # the state's reach could not show up anywhere.
+            live = [p for p in self.provs if p.key not in self.lost_provinces]
+            if not live:
+                return 0.12
+            pop = sum(p.pop for p in live)
+            acc = sum(p.pop * (1.0 / (1.0 + p.freight())) for p in live) / max(1e-6, pop)
+            return max(0.12, min(1.0, (acc + self.supplied("reach"))
+                                 / max(1.0, self.admin_load ** 0.8)))
         if link == "consent":
             v = 1.0
             for h in self.settlement:
@@ -644,9 +653,11 @@ class Game:
                 hunger = 1.0 - self.mean_welfare()
                 return max(0.08, min(1.0, 0.95 - unrest * 0.8 - hunger * 0.9
                                      + self.supplied("compliance")))
-            # households only spare children where there is a return to reading
+            # Households only spare children where there is a return to reading. This was
+            # 0.18 + lit*1.3 + supplied, which evaluates to 1.08 before the game starts —
+            # over its own cap, so the gate never existed.
             lit_return = sum(p.bourgeoisie * p.pop for p in self.provs) / sum(p.pop for p in self.provs)
-            return min(1.0, 0.18 + lit_return * 1.3 + self.supplied("compliance"))
+            return min(1.0, 0.06 + lit_return * 0.95 + self.supplied("compliance") * 0.45)
         if link == "substrate":
             if line_key == "railway":
                 iron = sum(p.stocks["iron"] for p in self.provs)

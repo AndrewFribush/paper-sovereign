@@ -220,6 +220,71 @@ def thresholds():
     return bad
 
 
+def links():
+    """Every link's trajectory across a run.
+
+    Legibility hit its 1.0 cap by year 3 in every playstyle, which meant it stopped
+    binding anything, could not gate the fiscal ladder, and made the late game look
+    frozen for reasons that had nothing to do with the late game. No check caught it,
+    because every check looked at peaks and outcomes rather than at trajectories.
+
+    A link that saturates is a link that has stopped existing. A link that never rises
+    is a wall the player cannot climb.
+    """
+    from game.sim import Game
+
+    LINKS = ["agents", "reach", "consent", "legibility", "compliance", "substrate"]
+    traj = {k: {} for k in LINKS}
+    binds = Counter()
+    for name, mix in STYLES.items():
+        for seed in range(1, 6):
+            g = Game(seed)
+            g.collect()
+            while not g.game_over:
+                if g.crisis:
+                    g.choose(g.crisis.choices[0].key)
+                    continue
+                for l in LINES:
+                    b, _ = g.preview(l.key)
+                    binds[b] += 1
+                for k in LINKS:
+                    # take the value on whichever line actually uses that link
+                    for l in LINES:
+                        if k in l.links:
+                            traj[k].setdefault(g.turn, []).append(g.link_value(l.key, k))
+                            break
+                t = g.treasury
+                for kk, v in mix.items():
+                    g.budget[kk] = t * v
+                g.end_turn()
+                g.notice = []
+                if not g.game_over:
+                    g.collect()
+
+    print("\nLINKS  (a link that saturates has stopped existing; one that never rises is a wall)")
+    print(f"  {'link':12s} {'yr1':>6} {'yr5':>6} {'yr10':>6} {'yr20':>6} {'sat%':>6} {'binds%':>7}")
+    total_binds = sum(binds.values())
+    bad = []
+    for k in LINKS:
+        row = [st.median(traj[k].get(y, [0])) for y in (0, 4, 9, 19)]
+        allv = [v for ys in traj[k].values() for v in ys]
+        sat = 100 * sum(1 for v in allv if v > 0.97) / max(1, len(allv))
+        bpc = 100 * binds[k] / max(1, total_binds)
+        flag = ""
+        if sat > 55:
+            flag = "  <-- SATURATED"; bad.append(k)
+        elif row[3] < 0.25 and row[0] < 0.25:
+            flag = "  <-- NEVER RISES"; bad.append(k)
+        elif bpc < 1.0:
+            flag = "  <-- never binds"
+        print(f"  {k:12s} {row[0]:6.2f} {row[1]:6.2f} {row[2]:6.2f} {row[3]:6.2f} "
+              f"{sat:5.0f}% {bpc:6.1f}%{flag}")
+    if not bad:
+        print("\n  every link moves across a run and none is stuck at its cap")
+    return bad
+
+
 if __name__ == "__main__":
     main()
     thresholds()
+    links()
