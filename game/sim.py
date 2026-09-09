@@ -183,7 +183,7 @@ def wage_of(prov: Province) -> float:
     # calibrated against the basket at PREVAILING prices, not reference prices:
     # grain trades near 3x its reference in an ordinary year, so a wage set against
     # the reference makes the whole country read as permanently half-starving.
-    base = 17.0 + 25.0 * prov.bourgeoisie + 11.0 * prov.literacy
+    base = 8.0 + 12.0 * prov.bourgeoisie + 5.5 * prov.literacy
     return base * (0.85 + 0.30 * min(1.5, sum(prov.capacity.values()) / max(1.0, prov.pop)))
 
 
@@ -814,6 +814,18 @@ class Game:
         for p in self.provs:
             for g in GOOD_KEYS:
                 out = p.capacity[g] * (climate if g == "grain" else 1.0)
+                # SUPPLY RESPONSE. Without it, equilibrium cover is
+                #   carry*(P/C - 1)/(1 - carry)
+                # which at carry .88 multiplies any drift in the production ratio by
+                # 7.3, and price responds as cover^-1.9. A 1% shift in P/C then moves
+                # the price level enormously — the knife-edge that turns into the
+                # "one good's price hitting infinity in 1847" the design warns about.
+                # High prices call forth supply: more land under plough, more shifts
+                # worked, marginal seams reopened. It is the negative feedback that
+                # makes the whole price model robust instead of merely bounded.
+                gd = GOODS[g]
+                elast = 0.35 if g == "grain" else 0.55
+                out *= min(1.6, max(0.55, (price_of(p, g) / gd.ref_price) ** elast))
                 out *= self.rng.uniform(0.92, 1.08)
                 p.stocks[g] += out
                 p.stocks[g] = max(0.0, p.stocks[g] - p.consumption(g))
