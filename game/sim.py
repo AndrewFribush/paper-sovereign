@@ -121,6 +121,12 @@ class Province:
     industry: dict = field(default_factory=dict)   # capital stock per good
     unrest: float = 0.0
     grievance: float = 0.0   # struck stakes: commons, gleaning, customary right
+    # The mirror of grievance, and it decays at the same rate. A state that fed you in
+    # a dearth is remembered as surely as one that took the commons — that is the whole
+    # moral-economy claim, and without it relief was measurably not worth using: it
+    # bought 0.40 off unrest for one year, unrest regenerated, and using the lever as
+    # designed cost 1.41 points of national welfare to gain 0.45 for the worst-off.
+    goodwill: float = 0.0
     tax_burden: float = 0.0  # share of the wage the state takes here, set each tick
     munitions_demand: float = 0.0  # what the army stationed here eats
     # who obstructs here, and how hard (0..1). politics-and-discretion.md
@@ -801,6 +807,10 @@ class Game:
         arrived = give * max(0.25, 1.0 - p.freight() * 0.22)
         p.stocks["grain"] += arrived
         p.unrest = max(0.0, p.unrest - 0.40)
+        # and it is remembered: what the state did in the dearth is the thing the
+        # moral economy is about. Scaled by what actually ARRIVED, not what was sent —
+        # a relief that is lost on the road buys no gratitude either.
+        p.goodwill = min(0.6, p.goodwill + 0.30 * (arrived / max(1e-6, want)))
         loss = (give - arrived) / give
         msg = f"Relief opened at {p.name}: {give:,.0f} qr sent"
         if loss > 0.12:
@@ -1271,8 +1281,9 @@ class Game:
         for p in self.provs:
             w = welfare(p)
             p.grievance *= 0.94        # a generation to forget an enclosure
+            p.goodwill *= 0.94         # and just as long to forget being fed
             p.unrest = max(0.0, min(1.0, p.unrest * 0.75 + (0.75 - w) * 1.1
-                                    + p.grievance * 0.9))
+                                    + p.grievance * 0.9 - p.goodwill * 0.9))
 
     def _invest(self):
         """Increasing returns. Main doc §14: agglomeration is not a new system, it is
@@ -1657,7 +1668,7 @@ class Game:
             "unlocked": sorted(self.unlocked),
             "provs": [{"key": p.key, "pop": p.pop, "pop_ref": p.pop_ref, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
-                       "unrest": p.unrest, "grievance": p.grievance, "tax_burden": p.tax_burden, "flood_cost": p.flood_cost, "stocks": p.stocks, "capacity": p.capacity,
+                       "unrest": p.unrest, "grievance": p.grievance, "goodwill": p.goodwill, "tax_burden": p.tax_burden, "flood_cost": p.flood_cost, "stocks": p.stocks, "capacity": p.capacity,
                        "industry": p.industry, "bourgeoisie": p.bourgeoisie}
                       for p in self.provs],
             "settlement": [{"key": h.key, "consent": h.consent,
@@ -1743,7 +1754,7 @@ class Game:
         g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
-            for k in ("pop", "pop_ref", "literacy", "base_freight", "railed", "unrest", "grievance", "tax_burden", "flood_cost", "stocks", "capacity",
+            for k in ("pop", "pop_ref", "literacy", "base_freight", "railed", "unrest", "grievance", "goodwill", "tax_burden", "flood_cost", "stocks", "capacity",
                       "industry", "bourgeoisie"):
                 setattr(p, k, pd[k])
         for hd in d["settlement"]:

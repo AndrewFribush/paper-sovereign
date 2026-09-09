@@ -289,6 +289,55 @@ def _welfare_sees_price() -> bool:
     return after < before - 0.01 and basket_cost(p) > 0 and wage_of(p) > 0
 
 
+def relief_is_worth_using():
+    """The one lever the design singles out has to be worth pulling.
+
+    Measured before goodwill existed: using relief as intended cost 1.41 points of
+    national welfare, gained 0.45 for the worst-off province, and changed the number of
+    sedition crises by exactly nothing. It moved the world and the world did not care.
+    Grievance already persisted — "a generation to forget an enclosure" — and nothing
+    persisted on the other side, so being fed in a dearth was forgotten by the next
+    tick. Goodwill is its mirror, decaying at the same rate.
+    """
+    print("\nRELIEF  (the lever the design singles out must be worth pulling)")
+    ref = GOODS["grain"].ref_price
+    mix = dict(census=.10, army=.25, railway=.10, granary=.40, normal=.05,
+               schools=.05, land=.05)
+
+    def run(relief):
+        sed, wel = [], []
+        for seed in SEEDS[:10]:
+            g = Game(seed); g.collect(); n = 0
+            while not g.game_over:
+                if g.crisis:
+                    if g.crisis.key == "sedition":
+                        n += 1
+                    g.choose(g.crisis.choices[0].key)
+                    continue
+                if relief:
+                    for p in g.provs:
+                        if p.key in g.lost_provinces:
+                            continue
+                        ob = g.beliefs.get_price(p.key, "grain")
+                        if ob and ob.value > ref * 1.45:
+                            g.relieve(p.key)
+                t = g.treasury
+                for k, v in mix.items():
+                    g.budget[k] = t * v
+                g.end_turn(); g.notice = []
+                if not g.game_over:
+                    g.collect()
+            sed.append(n); wel.append(g.mean_welfare())
+        return st.mean(sed), st.mean(wel)
+
+    s0, w0 = run(False)
+    s1, w1 = run(True)
+    check("relieving a dearth buys political quiet", s1 < s0 * 0.75,
+          f"sedition crises {s0:.2f} -> {s1:.2f} per run")
+    check("and it is paid for, so it is a trade and not a free win",
+          w1 < w0, f"welfare {w0*100:.1f}% -> {w1*100:.1f}%")
+
+
 def known_findings():
     """Measured defects recorded rather than fixed. Empty is the goal. See BUILD-LOG."""
     print("\nKNOWN OPEN FINDINGS  (measured, recorded, pinned so they cannot worsen)")
@@ -626,7 +675,7 @@ def main():
           f"{len(LINES)} budget lines")
     invariants(); bounds(); links_and_scarcity(); signal(); welfare_shape()
     conservation(); mechanism(); thesis(); persistence(); ui_smoke()
-    population_and_output(); known_findings()
+    population_and_output(); relief_is_worth_using(); known_findings()
     print()
     if OPEN:
         print(f"{len(OPEN)} KNOWN OPEN FINDING(S), recorded in BUILD-LOG: " + "; ".join(OPEN))
