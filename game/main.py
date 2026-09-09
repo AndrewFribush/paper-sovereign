@@ -810,134 +810,146 @@ class UI:
         key = LINES[self.sel].key
         g.budget[key] = max(0.0, g.budget[key] + delta)
 
+    # The event chain and the frame are split out of the loop so both the game and a
+    # test can drive them. Everything in handle() was unreachable from any harness:
+    # the key bindings, the panel toggles, the province hit-testing and every button
+    # rectangle were exercised only by a person with a mouse.
+    def handle(self, e) -> bool:
+        """Apply one event. Returns False to quit."""
+        if e.type == pygame.QUIT:
+            return False
+        if e.type == pygame.KEYDOWN:
+            if self.g.crisis:
+                for i, ch in enumerate(self.g.crisis.choices):
+                    if e.key == getattr(pygame, f"K_{i+1}"):
+                        self.g.choose(ch.key); break
+                return True
+            if self.g.notice:
+                if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                    self.g.notice = []
+                return True
+            if self.intro:
+                if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                    self.intro = False
+                elif e.key == pygame.K_ESCAPE:
+                    return False
+                return True
+            if e.key == pygame.K_ESCAPE:
+                if self.detail or self.politics or self.ledger or self.exchequer:
+                    self.detail = None
+                    self.politics = False
+                    self.ledger = False
+                    self.exchequer = False
+                    return True
+                return False
+            if e.key == pygame.K_F1:
+                self.inspector = not self.inspector
+            if e.key == pygame.K_s:
+                self.g.log.insert(0, self.g.save())
+            if e.key == pygame.K_l:
+                loaded = self.g.__class__.load()
+                if loaded:
+                    self.g = loaded
+                    self.detail = None; self.politics = False
+                    self.g.log.insert(0, "Loaded.")
+            if e.key == pygame.K_p:
+                self.politics = not self.politics
+                self.detail = None; self.ledger = False
+            if e.key == pygame.K_t:
+                self.ledger = not self.ledger
+                self.detail = None; self.politics = False; self.exchequer = False
+            if e.key == pygame.K_x:
+                self.exchequer = not self.exchequer
+                self.detail = None; self.politics = False; self.ledger = False
+            if self.g.game_over:
+                return True
+            if e.key in (pygame.K_DOWN, pygame.K_j):
+                self.sel = (self.sel + 1) % len(LINES)
+            if e.key in (pygame.K_UP, pygame.K_k):
+                self.sel = (self.sel - 1) % len(LINES)
+            mult = 100 if (e.mod & pygame.KMOD_SHIFT) else 25
+            if e.key == pygame.K_RIGHT:
+                self.step(mult)
+            if e.key == pygame.K_LEFT:
+                self.step(-mult)
+            if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.g.end_turn()
+                if not self.g.game_over:
+                    self.g.collect()
+        if e.type == pygame.MOUSEBUTTONDOWN and self.g.crisis:
+            for k, r in getattr(self, "crisis_btn", {}).items():
+                if r.collidepoint(e.pos):
+                    self.g.choose(k); break
+            return True
+        if (e.type == pygame.MOUSEBUTTONDOWN and not self.g.game_over
+                and not self.intro and not self.g.notice):
+            mx, my = e.pos
+            if mx >= 694:                       # the appropriations column
+                for i, line in enumerate(LINES):
+                    top = 128 + i * 66
+                    if top <= my <= top + 62:
+                        self.sel = i
+                        if e.button == 1: self.step(25)
+                        if e.button == 3: self.step(-25)
+                        break
+            elif self.exchequer:
+                for (sign, tk), r in getattr(self, "tax_btn", {}).items():
+                    if r.collidepoint(mx, my):
+                        d = 0.05 if sign == "+" else -0.05
+                        self.g.tax[tk] = max(0.0, min(1.0, self.g.tax[tk] + d))
+                        self.g._apply_tax_burden()
+                        break
+            elif self.politics:
+                for (kind, hk), r in self.btn.items():
+                    if r.collidepoint(mx, my):
+                        if kind == "pay": self.g.pay(hk)
+                        else: self.g.override(hk)
+                        break
+            elif self.detail:
+                hit = None
+                for (kind, hk), r in self.btn.items():
+                    if kind == "relief" and r.collidepoint(mx, my):
+                        hit = hk
+                if hit:
+                    self.g.log.insert(0, self.g.relieve(hit))
+                else:
+                    self.detail = None
+            else:
+                for k, r in self.prov_rects.items():
+                    if r.collidepoint(mx, my) and k not in self.g.lost_provinces:
+                        self.detail = k
+                        break
+        return True
+
+    def frame(self):
+        """Draw one frame into self.screen. No event handling, no flip."""
+        self.screen.fill(PARCH)
+        if self.intro:
+            self.draw_brief()
+            return
+        if self.g.game_over:
+            self.draw_end()
+        else:
+            self.draw_header()
+            if self.politics: self.draw_politics()
+            elif self.exchequer: self.draw_exchequer()
+            elif self.ledger: self.draw_ledger()
+            elif self.detail: self.draw_detail()
+            else: self.draw_map()
+            self.draw_budget(); self.draw_log()
+        if self.g.crisis:
+            self.draw_crisis()
+        elif self.g.notice:
+            self.draw_notice()
+
     def run(self):
         while True:
             for e in pygame.event.get():
-                if e.type == pygame.QUIT:
+                if not self.handle(e):
                     return
-                if e.type == pygame.KEYDOWN:
-                    if self.g.crisis:
-                        for i, ch in enumerate(self.g.crisis.choices):
-                            if e.key == getattr(pygame, f"K_{i+1}"):
-                                self.g.choose(ch.key); break
-                        continue
-                    if self.g.notice:
-                        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                            self.g.notice = []
-                        continue
-                    if self.intro:
-                        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                            self.intro = False
-                        elif e.key == pygame.K_ESCAPE:
-                            return
-                        continue
-                    if e.key == pygame.K_ESCAPE:
-                        if self.detail or self.politics or self.ledger or self.exchequer:
-                            self.detail = None
-                            self.politics = False
-                            self.ledger = False
-                            self.exchequer = False
-                            continue
-                        return
-                    if e.key == pygame.K_F1:
-                        self.inspector = not self.inspector
-                    if e.key == pygame.K_s:
-                        self.g.log.insert(0, self.g.save())
-                    if e.key == pygame.K_l:
-                        loaded = self.g.__class__.load()
-                        if loaded:
-                            self.g = loaded
-                            self.detail = None; self.politics = False
-                            self.g.log.insert(0, "Loaded.")
-                    if e.key == pygame.K_p:
-                        self.politics = not self.politics
-                        self.detail = None; self.ledger = False
-                    if e.key == pygame.K_t:
-                        self.ledger = not self.ledger
-                        self.detail = None; self.politics = False; self.exchequer = False
-                    if e.key == pygame.K_x:
-                        self.exchequer = not self.exchequer
-                        self.detail = None; self.politics = False; self.ledger = False
-                    if self.g.game_over:
-                        continue
-                    if e.key in (pygame.K_DOWN, pygame.K_j):
-                        self.sel = (self.sel + 1) % len(LINES)
-                    if e.key in (pygame.K_UP, pygame.K_k):
-                        self.sel = (self.sel - 1) % len(LINES)
-                    mult = 100 if (e.mod & pygame.KMOD_SHIFT) else 25
-                    if e.key == pygame.K_RIGHT:
-                        self.step(mult)
-                    if e.key == pygame.K_LEFT:
-                        self.step(-mult)
-                    if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                        self.g.end_turn()
-                        if not self.g.game_over:
-                            self.g.collect()
-                if e.type == pygame.MOUSEBUTTONDOWN and self.g.crisis:
-                    for k, r in getattr(self, "crisis_btn", {}).items():
-                        if r.collidepoint(e.pos):
-                            self.g.choose(k); break
-                    continue
-                if (e.type == pygame.MOUSEBUTTONDOWN and not self.g.game_over
-                        and not self.intro and not self.g.notice):
-                    mx, my = e.pos
-                    if mx >= 694:                       # the appropriations column
-                        for i, line in enumerate(LINES):
-                            top = 128 + i * 66
-                            if top <= my <= top + 62:
-                                self.sel = i
-                                if e.button == 1: self.step(25)
-                                if e.button == 3: self.step(-25)
-                                break
-                    elif self.exchequer:
-                        for (sign, tk), r in getattr(self, "tax_btn", {}).items():
-                            if r.collidepoint(mx, my):
-                                d = 0.05 if sign == "+" else -0.05
-                                self.g.tax[tk] = max(0.0, min(1.0, self.g.tax[tk] + d))
-                                self.g._apply_tax_burden()
-                                break
-                    elif self.politics:
-                        for (kind, hk), r in self.btn.items():
-                            if r.collidepoint(mx, my):
-                                if kind == "pay": self.g.pay(hk)
-                                else: self.g.override(hk)
-                                break
-                    elif self.detail:
-                        hit = None
-                        for (kind, hk), r in self.btn.items():
-                            if kind == "relief" and r.collidepoint(mx, my):
-                                hit = hk
-                        if hit:
-                            self.g.log.insert(0, self.g.relieve(hit))
-                        else:
-                            self.detail = None
-                    else:
-                        for k, r in self.prov_rects.items():
-                            if r.collidepoint(mx, my) and k not in self.g.lost_provinces:
-                                self.detail = k
-                                break
-
-            self.screen.fill(PARCH)
-            if self.intro:
-                self.draw_brief()
-                pygame.display.flip(); self.clock.tick(60); continue
-            if self.g.game_over:
-                self.draw_end()
-            else:
-                self.draw_header()
-                if self.politics: self.draw_politics()
-                elif self.exchequer: self.draw_exchequer()
-                elif self.ledger: self.draw_ledger()
-                elif self.detail: self.draw_detail()
-                else: self.draw_map()
-                self.draw_budget(); self.draw_log()
-            if self.g.crisis:
-                self.draw_crisis()
-            elif self.g.notice:
-                self.draw_notice()
+            self.frame()
             pygame.display.flip()
             self.clock.tick(60)
-
 
 if __name__ == "__main__":
     UI().run()
