@@ -931,10 +931,19 @@ class Game:
         # vital registration keeps the population figure from drifting between counts
         if "vital" in self.unlocked:
             for p in self.provs:
-                o = self.beliefs.pop.get(p.key)
-                if o:
-                    drift = 0.30 * (p.pop - o.value)
-                    self.beliefs.pop[p.key] = Obs(o.value + drift, self.year, "registrar")
+                if p.key in self.lost_provinces:
+                    continue
+                ob = self.beliefs.pop.get(p.key)
+                if not ob:
+                    continue
+                # A registrar is a person in an office in a place. Registration reaches
+                # where the state reaches — without this it refreshed Cauldfell, which
+                # has no merchant, no census and barely a road, and every province on
+                # the ledger read "1y" the moment the category unlocked.
+                if self.rng.random() > 1.0 / (1.0 + p.freight() * 0.9):
+                    continue
+                drift = 0.30 * (p.pop - ob.value)
+                self.beliefs.pop[p.key] = Obs(ob.value + drift, self.year, "registrar")
         for p in self.provs:
             if p.key in self.lost_provinces:
                 continue
