@@ -290,44 +290,87 @@ def _welfare_sees_price() -> bool:
 
 
 def known_findings():
-    """Measured defects recorded rather than fixed. See BUILD-LOG."""
+    """Measured defects recorded rather than fixed. Empty is the goal. See BUILD-LOG."""
     print("\nKNOWN OPEN FINDINGS  (measured, recorded, pinned so they cannot worsen)")
+    if not OPEN:
+        print("  none")
+
+
+def population_and_output():
+    """A plague must be a short bump and a lasting loss, not a windfall.
+
+    Capacity used to track population upward only — `capacity *= 1+rate` beside
+    `pop *= 1+rate` — so nothing withdrew land when the people were gone. Killing a
+    quarter of the population raised measured welfare by 12.15 points and kept it
+    there eight turns later, and halving the population left tax revenue exactly
+    unchanged, because revenue is computed off capacity too.
+
+    The immediate bump is CORRECT and is not asserted away: this year's harvest is
+    already in the ground, and real wages did rise after the Black Death. What is
+    asserted is that it decays, and that the loss shows up where a state would feel
+    it — in the revenue.
+    """
+    print("\nPOPULATION AND OUTPUT  (a plague is a bump, then a loss)")
     import copy
-    g = Game(5); g.collect()
-    for _ in range(6):
+    MIX = dict(census=.16, army=.26, railway=.13, granary=.13, normal=.13,
+               schools=.10, land=.09)
+
+    def step(g):
         if g.crisis:
-            g.choose(g.crisis.choices[0].key); continue
+            g.choose(g.crisis.choices[0].key); return
         t = g.treasury
-        for k, v in dict(census=.16, army=.26, railway=.13, granary=.13,
-                         normal=.13, schools=.10, land=.09).items():
+        for k, v in MIX.items():
             g.budget[k] = t * v
         g.end_turn(); g.notice = []
-        if not g.game_over: g.collect()
-    base = g.mean_welfare()
-    h = copy.deepcopy(g)
-    for p in h.provs:
-        p.pop *= 0.75
-    h.collect()
-    gain = (h.mean_welfare() - base) * 100
-    # Production capacity does not scale with the workforce, so a quarter of the
-    # people dying costs no output and hands every survivor a quarter more goods.
-    # Measured at +12.15 points and persistent eight turns later.
-    known_open("losing a quarter of the population must not raise welfare",
-               fixed=gain <= 1.0, worse=gain > 14.0,
-               detail=f"killing 25% of the population moves mean welfare {gain:+.2f} points")
+        if not g.game_over:
+            g.collect()
 
-    # Same root cause, second symptom: revenue() is computed from capacity too, so
-    # losing half your subjects costs nothing at the exchequer. Pinned separately
-    # because it will be fixed by the same one-line change and should flip with it.
-    r0 = g.revenue()
-    h2 = copy.deepcopy(g)
-    for p in h2.provs:
-        p.pop *= 0.5
-    h2.collect()
-    drop = (r0 - h2.revenue()) / max(1e-6, r0) * 100
-    known_open("losing half the population must cost something at the exchequer",
-               fixed=drop >= 10.0, worse=drop < -1.0,
-               detail=f"halving the population moves revenue {-drop:+.2f}%")
+    immediate, late, rev = [], [], []
+    for seed in SEEDS[:8]:
+        g = Game(seed); g.collect()
+        for _ in range(6):
+            step(g)
+        a, b = copy.deepcopy(g), copy.deepcopy(g)
+        for p in b.provs:
+            p.pop *= 0.75
+        b.collect()
+        immediate.append((b.mean_welfare() - a.mean_welfare()) * 100)
+        gaps = []
+        for t in range(8):
+            step(a); step(b)
+            if a.game_over or b.game_over:
+                break
+            if t >= 2:
+                gaps.append((b.mean_welfare() - a.mean_welfare()) * 100)
+                rev.append((b.revenue() - a.revenue()) / max(1e-6, a.revenue()) * 100)
+        if gaps:
+            late.append(st.mean(gaps))
+
+    # The population must actually grow, asserted directly. It used to be caught only
+    # by side effects — a link drifting toward its cap as the country outgrew its
+    # institutions — and making capacity track population removed those side effects,
+    # because a country that never grows is now internally consistent. A bug that
+    # stops being detectable when an unrelated thing is fixed was never really being
+    # detected; it was being inferred.
+    grew = []
+    for seed in SEEDS[:6]:
+        g = Game(seed); g.collect()
+        start = g.true_pop()
+        for _ in range(12):
+            if g.game_over: break
+            step(g)
+        grew.append(g.true_pop() / max(1e-6, start))
+    growth = st.mean(grew)
+    check("the population grows, so every count starts going stale", growth > 1.06,
+          f"x{growth:.3f} over twelve years")
+
+    imm, lat, rv = st.mean(immediate), st.mean(late), st.mean(rev)
+    check("a plague is a short-run windfall, as it should be", imm > 2.0,
+          f"{imm:+.2f} points in the year it happens")
+    check("and the windfall does not last", abs(lat) < 4.0,
+          f"{lat:+.2f} points averaged over the following years")
+    check("losing a quarter of the people costs the exchequer",
+          rv < -12.0, f"revenue {rv:+.1f}%")
 
 
 def conservation():
@@ -583,7 +626,7 @@ def main():
           f"{len(LINES)} budget lines")
     invariants(); bounds(); links_and_scarcity(); signal(); welfare_shape()
     conservation(); mechanism(); thesis(); persistence(); ui_smoke()
-    known_findings()
+    population_and_output(); known_findings()
     print()
     if OPEN:
         print(f"{len(OPEN)} KNOWN OPEN FINDING(S), recorded in BUILD-LOG: " + "; ".join(OPEN))

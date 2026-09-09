@@ -126,6 +126,13 @@ class Province:
     # who obstructs here, and how hard (0..1). politics-and-discretion.md
     clergy_strength: float = 0.0
     noble_strength: float = 0.0
+    # The population capacity was last sized for. Capacity already tracked population
+    # UPWARD — `capacity *= 1+rate` sat beside `pop *= 1+rate` — but nothing tracked it
+    # downward, so a plague cost no output while removing the mouths, and losing a
+    # quarter of the people raised measured welfare by 12 points permanently. Holding
+    # the reference here makes capacity follow population through every path that
+    # changes it, including the crisis choices that multiply pop directly.
+    pop_ref: float = 0.0
 
     # set each tick from the cost flood; base_freight survives only as the fallback
     # used before a network exists and as the seed for map content.
@@ -234,6 +241,8 @@ def build_world(rng: random.Random) -> list[Province]:
         for g in GOOD_KEYS:
             # start each province near its target cover so year 1 is not a crisis
             p.stocks[g] = p.consumption(g) * GOODS[g].target_cover * rng.uniform(0.85, 1.15)
+        # capacity is sized for this many people; see Province.pop_ref
+        p.pop_ref = p.pop
     return provs
 
 
@@ -1163,10 +1172,18 @@ class Game:
             # welfare. Uncapped, that loop runs away and the country doubles.
             rate = min(0.022, 0.004 + 0.011 * p.bourgeoisie + 0.010 * (w - 0.6))
             p.pop = max(0.5, p.pop * (1.0 + rate))
-            # land comes into cultivation with the people. The squeeze the player must answer
-            # is the climate excursion, not a structural Malthusianism they have no lever on.
+            # Land comes into cultivation with the people, and goes out of it with them.
+            # Scaling by the REALISED ratio rather than by `rate` is identical while the
+            # population is growing — which is what this line did before — and correctly
+            # withdraws capacity when it is not, whatever removed the people: a plague, a
+            # crisis choice that multiplies pop directly, a cordon. The squeeze the player
+            # must answer is still the climate excursion, not a structural Malthusianism.
+            if p.pop_ref <= 0.0:
+                p.pop_ref = p.pop
+            ratio = p.pop / max(1e-6, p.pop_ref)
             for _g in GOOD_KEYS:
-                p.capacity[_g] *= 1.0 + rate   # land brought into cultivation
+                p.capacity[_g] *= ratio
+            p.pop_ref = p.pop
 
         for p in self.provs:
             for g in GOOD_KEYS:
@@ -1614,7 +1631,7 @@ class Game:
             "lost": self.lost_provinces,
             "tax": self.tax,
             "unlocked": sorted(self.unlocked),
-            "provs": [{"key": p.key, "pop": p.pop, "literacy": p.literacy,
+            "provs": [{"key": p.key, "pop": p.pop, "pop_ref": p.pop_ref, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
                        "unrest": p.unrest, "grievance": p.grievance, "tax_burden": p.tax_burden, "flood_cost": p.flood_cost, "stocks": p.stocks, "capacity": p.capacity,
                        "industry": p.industry, "bourgeoisie": p.bourgeoisie}
@@ -1702,7 +1719,7 @@ class Game:
         g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
-            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "grievance", "tax_burden", "flood_cost", "stocks", "capacity",
+            for k in ("pop", "pop_ref", "literacy", "base_freight", "railed", "unrest", "grievance", "tax_burden", "flood_cost", "stocks", "capacity",
                       "industry", "bourgeoisie"):
                 setattr(p, k, pd[k])
         for hd in d["settlement"]:

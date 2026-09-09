@@ -134,8 +134,8 @@ def main():
     with_rail = spread({"railway": .7, "army": .3})
     without = spread({"granary": .7, "army": .3})
     check("the railway closes the price spread by the stated amount",
-          anchored("from 3.98x to 1.69x"),
-          abs(without - 3.98) < 0.20 and abs(with_rail - 1.69) < 0.12,
+          anchored("from 3.76x to 1.67x"),
+          abs(without - 3.76) < 0.20 and abs(with_rail - 1.67) < 0.12,
           f"measured {without:.2f}x -> {with_rail:.2f}x")
 
     # 6. the schools example, message and number
