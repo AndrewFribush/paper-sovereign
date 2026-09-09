@@ -289,6 +289,65 @@ def _welfare_sees_price() -> bool:
     return after < before - 0.01 and basket_cost(p) > 0 and wage_of(p) > 0
 
 
+def belief_layers_are_several():
+    """Several layers, never reconciled, with different latencies AND different biases.
+
+    Main doc §2 and the belief-layer build item both say the point is that the state
+    holds more than one number for the same fact and cannot rank them. If every source
+    were merely a noisier or staler version of the same thing, the player could rank
+    them once and stop reading — the layers would be decoration on a single number.
+
+    Measured: the inherited survey is 28 years old and 27% low; the registrar is under
+    two years old and 10% low; the census is 6 years old and 6% low. The registrar is
+    the FRESHEST and the census the most ACCURATE, which is what makes the ledger's
+    dates worth reading — a recent number that is more wrong than an old one.
+    """
+    print("\nBELIEF LAYERS  (several, unreconciled, differently wrong)")
+    from collections import defaultdict
+    err, age = defaultdict(list), defaultdict(list)
+    mix = dict(census=.20, army=.25, railway=.15, granary=.10, normal=.10,
+               schools=.10, land=.10)
+    for seed in SEEDS[:10]:
+        g = Game(seed); g.collect()
+        while not g.game_over:
+            if g.crisis:
+                keys = [c.key for c in g.crisis.choices]
+                g.choose("commission" if "commission" in keys else keys[0])
+                continue
+            t = g.treasury
+            for k, v in mix.items():
+                g.budget[k] = t * v
+            g.end_turn(); g.notice = []
+            if not g.game_over:
+                g.collect()
+            for p in g.provs:
+                if p.key in g.lost_provinces:
+                    continue
+                ob = g.beliefs.pop.get(p.key)
+                if not ob:
+                    continue
+                err[ob.source].append(abs(ob.value - p.pop) / max(1e-6, p.pop))
+                age[ob.source].append(ob.age(g.year))
+    live = [k for k in err if len(err[k]) > 50]
+    check("the state holds more than two kinds of number for the same fact",
+          len(live) >= 3, f"sources: {', '.join(sorted(live))}")
+    if len(live) < 2:
+        return
+    acc = {k: st.mean(err[k]) for k in live}
+    old_ = {k: st.mean(age[k]) for k in live}
+    freshest = min(old_, key=old_.get)
+    truest = min(acc, key=acc.get)
+    check("no source is both the freshest and the most accurate",
+          freshest != truest,
+          f"freshest is {freshest} ({old_[freshest]:.1f}y), truest is {truest} "
+          f"({acc[truest]*100:.1f}% out)")
+    spread_age = max(old_.values()) - min(old_.values())
+    spread_err = max(acc.values()) - min(acc.values())
+    check("and they differ on both latency and bias, not just one",
+          spread_age > 5.0 and spread_err > 0.05,
+          f"{spread_age:.1f} years apart, {spread_err*100:.1f} points apart")
+
+
 def relief_is_worth_using():
     """The one lever the design singles out has to be worth pulling.
 
@@ -703,7 +762,8 @@ def main():
           f"{len(LINES)} budget lines")
     invariants(); bounds(); links_and_scarcity(); signal(); welfare_shape()
     conservation(); mechanism(); thesis(); persistence(); ui_smoke()
-    population_and_output(); relief_is_worth_using(); known_findings()
+    population_and_output(); belief_layers_are_several()
+    relief_is_worth_using(); known_findings()
     print()
     if OPEN:
         print(f"{len(OPEN)} KNOWN OPEN FINDING(S), recorded in BUILD-LOG: " + "; ".join(OPEN))
