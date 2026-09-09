@@ -501,30 +501,69 @@ class UI:
 
     def draw_end(self):
         g = self.g
-        s = pygame.Surface((W, H)); s.set_alpha(238); s.fill(PARCH)
+        s = pygame.Surface((W, H)); s.set_alpha(240); s.fill(PARCH)
         self.screen.blit(s, (0, 0))
-        self.t(f"{g.year}", 80, 90, self.f_h1)
-        self.t(g.ending, 80, 140, self.f_h2)
-        self.t("There is no score. You said what you were trying to do; here is what happened.",
-               80, 176, self.f_sm, STALE)
-        rows = [
-            ("Subjects you believed you had", f"{g.believed_pop()*1000:,.0f}", BELIEVED),
-            ("Subjects you actually had",     f"{g.true_pop()*1000:,.0f}", TRUTH),
-            ("Literacy",                      f"{g.mean_literacy()*100:.1f}%", KNOWN),
-            ("Welfare of your people",        f"{g.mean_welfare()*100:.0f}%", KNOWN),
-            ("Treasury",                      f"£{g.treasury:,.0f}", KNOWN),
-            ("Provinces ceded",               f"{len(g.lost_provinces)}", RED if g.lost_provinces else KNOWN),
-            ("Sovereign credit",              f"{g.credit:.2f}", KNOWN),
-            ("Register quality",              f"{g.register_quality*100:.0f}%", KNOWN),
-        ]
-        y = 230
-        for label, val, col in rows:
-            self.t(label, 80, y, self.f, INK)
-            self.t(val, 560, y, self.f_h2, col)
-            y += 36
-        err = abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())
-        self.t(f"Your census was wrong by {err*100:.1f}% at the end.", 80, y + 20, self.f_h2, TRUTH)
-        self.t("ESC to quit", 80, y + 64, self.f_sm, STALE)
+        self.t(f"{g.year}", 60, 40, self.f_h1)
+        self.t(g.ending, 150, 50, self.f_h2, STALE)
+        self.rule(60, 86, W - 120)
+
+        # -- the country you made -----------------------------------------
+        self.t("THE COUNTRY YOU MADE", 60, 100, self.f_sm, STALE)
+        rows = [("Literacy", f"{g.mean_literacy()*100:.1f}%"),
+                ("Welfare of your people", f"{g.mean_welfare()*100:.0f}%"),
+                ("Treasury", f"£{g.treasury:,.0f}"),
+                ("Provinces held", f"{8 - len(g.lost_provinces)} of 8"),
+                ("Sovereign credit", f"{g.credit:.2f}"),
+                ("Register", f"{g.register_quality*100:.0f}%")]
+        y = 124
+        for label, val in rows:
+            self.t(label, 60, y, self.f_sm, INK)
+            self.t(val, 250, y - 3, self.f_h2, KNOWN)
+            y += 30
+        self.t("There is no score. A single number would encode a politics.",
+               60, y + 6, self.f_sm, STALE)
+
+        # -- where the money went -----------------------------------------
+        self.t("WHERE THE MONEY WENT", 400, 100, self.f_sm, STALE)
+        y = 124
+        tot = sum(g.spent_total.values()) + sum(g.wasted_total.values())
+        for line in LINES:
+            sp, wa = g.spent_total[line.key], g.wasted_total[line.key]
+            if sp + wa < 1:
+                continue
+            self.t(line.name, 400, y, self.f_sm, INK)
+            self.tr(f"£{sp:,.0f}", 620, y, self.f_sm, KNOWN)
+            if wa > 1:
+                self.tr(f"£{wa:,.0f} unspent", 740, y, self.f_sm, RED)
+            y += 22
+        if tot:
+            worst = max(LINES, key=lambda l: g.wasted_total[l.key])
+            if g.wasted_total[worst.key] > tot * 0.06:
+                self.t(f"Most of what you could not spend was on {worst.name.lower()}.",
+                       400, y + 8, self.f_sm, STALE)
+                self.t("The money was never the constraint.", 400, y + 26, self.f_sm, STALE)
+
+        # -- what you never found out --------------------------------------
+        self.rule(60, 400, W - 120)
+        self.t("WHAT YOU NEVER FOUND OUT", 60, 414, self.f_sm, STALE)
+        self.t("what the register said, and what was there", 340, 414, self.f_sm, TRUTH)
+        y = 438
+        for name, note, truth, err in g.epitaph():
+            col = TRUTH if (err is not None and err != 0 and (err == 9.99 or err > 0.15)) else INK
+            self.t(name, 60, y, self.f, KNOWN)
+            self.t(note, 220, y + 2, self.f_sm, BELIEVED)
+            self.t(truth, 470, y + 2, self.f_sm, col)
+            if isinstance(err, float) and err < 9 and err > 0.001:
+                self.t(f"{err*100:.0f}% out", 700, y + 2, self.f_sm,
+                       TRUTH if err > 0.15 else STALE)
+            y += 24
+
+        e = abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())
+        self.t(f"You governed {g.true_pop()*1000:,.0f} people believing there were "
+               f"{g.believed_pop()*1000:,.0f}.", 60, y + 16, self.f_h2, TRUTH)
+        self.t(f"After twenty years and everything you spent, you were still {e*100:.1f}% out.",
+               60, y + 46, self.f, INK)
+        self.t("ESC to quit", 60, H - 34, self.f_sm, STALE)
 
     # -- input ------------------------------------------------------------
     def step(self, delta):

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json, os, random
 from dataclasses import dataclass, field
 
+RED_FLAG = 9.99
 START_YEAR = 1650
 
 # Equilibrium stock is  carry*(P-C)/(1-carry).  For grain to sit near one year of
@@ -361,6 +362,8 @@ class Game:
         self.log: list[str] = []
         self.pending: list[str] = []
         self.results: list[ChainResult] = []
+        self.spent_total = {l.key: 0.0 for l in LINES}
+        self.wasted_total = {l.key: 0.0 for l in LINES}
         self.threat = 0.35           # the Tilly clock
         self.war_in = 8              # years until the neighbour is ready
         self.lost_provinces: list[str] = []
@@ -530,6 +533,8 @@ class Game:
             fr = ""
             if waste > appro * 0.12:
                 fr = FRICTION.get((line.key, binding), "the work did not proceed")
+            self.spent_total[line.key] += spent
+            self.wasted_total[line.key] += waste
             self.results.append(ChainResult(line.key, spent, appro, through, binding, fr))
             self._apply(line.key, through)
 
@@ -858,6 +863,25 @@ class Game:
         self.treasury += self.revenue()
 
     # -- readouts ---------------------------------------------------------
+    def epitaph(self) -> list:
+        """Retrospective legibility (main doc §19). Uncertainty about the future is a
+        game; mystery about the past is a bug report. So at the end, and only at the
+        end, the state is told what was actually there."""
+        out = []
+        for p in self.provs:
+            if p.key in self.lost_provinces:
+                out.append((p.name, "ceded", "", RED_FLAG))
+                continue
+            o = self.beliefs.pop.get(p.key)
+            if not o:
+                out.append((p.name, "never counted", f"{p.pop*1000:,.0f} were there", RED_FLAG))
+                continue
+            err = (p.pop - o.value) / max(1e-6, o.value)
+            note = f"{o.value*1000:,.0f} on file ({o.source} {o.year})"
+            truth = f"{p.pop*1000:,.0f} actually"
+            out.append((p.name, note, truth, abs(err)))
+        return out
+
     def believed_pop(self) -> float:
         return sum(o.value for k, o in self.beliefs.pop.items() if k not in self.lost_provinces)
 
