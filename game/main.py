@@ -480,7 +480,15 @@ class UI:
             y += 66
 
         self.rule(x0, y + 2, W - x0 - 24)
-        self.t("Money above the binding link is not spent.", x0, y + 10, self.f_sm, STALE)
+        # When the material constraints are solved, consent becomes the universal
+        # binder and the answer stops being money. Say so, once it is true.
+        binding = [g.preview(l.key)[0] for l in LINES]
+        n_consent = sum(1 for b in binding if b == "consent")
+        if n_consent >= 3:
+            self.t(f"Consent limits {n_consent} of {len(LINES)} lines. Money will not move them — press P.",
+                   x0, y + 10, self.f_sm, RED)
+        else:
+            self.t("Money above the binding link is not spent.", x0, y + 10, self.f_sm, STALE)
 
         self.t("INSTITUTIONS", x0, y + 40, self.f_sm, STALE)
         inst = [("Clerks", g.clerks), ("Masters", g.masters), ("Engineers", g.engineers),

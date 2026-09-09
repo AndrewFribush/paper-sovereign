@@ -389,7 +389,7 @@ class Category:
     reveal: list          # what the state learns, and wishes it had not
 
 CATEGORIES = [
-    Category("returns", "Trade returns", "clerks", 0.72,
+    Category("returns", "Trade returns", "clerks", 0.58,
              "Prices reported from provinces with no merchant of their own.",
              ["THE BOARD OF TRADE IS ESTABLISHED", "",
               "Until now you have read prices only where somebody had a reason",
@@ -397,14 +397,14 @@ CATEGORIES = [
               "was trading on their own account.", "",
               "Your clerks will now collect returns from every district you hold.",
               "You will not like all of them."]),
-    Category("vital", "Vital registration", "register", 0.80,
+    Category("vital", "Vital registration", "register", 0.52,
              "Births and burials. The population figure stops drifting between counts.",
              ["CIVIL REGISTRATION BEGINS", "",
               "Baptisms, marriages and burials were the church's books, and you",
               "read them only by its leave. Now they are yours.", "",
               "Your population figure will no longer go stale between counts —",
               "it will be corrected every year, by arithmetic you own."]),
-    Category("cost", "Cost of living", "clerks", 0.92,
+    Category("cost", "Cost of living", "clerks", 0.80,
              "Wages against prices. You can finally see who is being priced out.",
              ["A COST-OF-LIVING INDEX IS CONSTRUCTED", "",
               "You have always been able to see that grain was dear. You have",
@@ -722,6 +722,18 @@ class Game:
         self.clerks *= 0.97
         self.masters *= 0.985
         self.engineers *= 0.97
+        # Technical men are produced by the country, not appropriated. A province with
+        # literacy, a bourgeoisie and capital throws them off at some rate — which is
+        # why funding schools and industry eventually unlocks the works you could not
+        # previously build. Without this, `engineers` is gated on the very lines it
+        # gates, and the binding constraint never moves for the whole run.
+        live = [p for p in self.provs if p.key not in self.lost_provinces]
+        if live:
+            pool = sum(p.literacy * p.bourgeoisie * p.pop for p in live) / \
+                   max(1e-6, sum(p.pop for p in live))
+            target = min(0.95, pool * 3.4)
+            if target > self.engineers:
+                self.engineers += (target - self.engineers) * 0.16
         self.register_quality *= 0.965     # operating expenditure: goes stale fast
 
         self.turn += 1
@@ -928,11 +940,17 @@ class Game:
             p.bourgeoisie = min(0.95, p.bourgeoisie + ind * 0.010)
 
     def _events(self, y: int):
-        for p in self.provs:
-            if p.unrest > 0.62 and self.rng.random() < 0.45:
-                self.log.append(f"Bread riots in {p.name}. The magistrates ask for grain.")
-                if True:
-                    self.holder['nobles'].consent = max(0.05, self.holder['nobles'].consent - 0.04)
+        rioting = [p for p in self.provs
+                   if p.key not in self.lost_provinces
+                   and p.unrest > 0.78 and self.rng.random() < 0.30]
+        if rioting:
+            names = ", ".join(p.name for p in rioting[:3])
+            more = f" and {len(rioting)-3} others" if len(rioting) > 3 else ""
+            self.log.append(f"Bread riots in {names}{more}. The magistrates ask for grain.")
+            for p in rioting:
+                # an unanswered riot is a standing claim, not a mood
+                p.grievance = min(1.0, p.grievance + 0.10)
+            self.holder["nobles"].consent = max(0.05, self.holder["nobles"].consent - 0.05)
         if self.rng.random() < 0.12 and not self.holder['clergy'].overridden:
             self.holder['clergy'].consent = max(0.05, self.holder['clergy'].consent - 0.08)
             self.log.append("A pastoral letter warns against the schools of the state.")
