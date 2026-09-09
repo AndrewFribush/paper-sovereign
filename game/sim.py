@@ -84,6 +84,7 @@ class Province:
     capacity: dict                   # good -> annual output at full capacity
     stocks: dict = field(default_factory=dict)
     railed: bool = False
+    industry: dict = field(default_factory=dict)   # capital stock per good
     unrest: float = 0.0
     # who obstructs here, and how hard (0..1). politics-and-discretion.md
     clergy_strength: float = 0.0
@@ -139,6 +140,9 @@ def build_world(rng: random.Random) -> list[Province]:
             k = need * GOODS[g].surplus / have
             for p in provs:
                 p.capacity[g] *= k
+    for p in provs:
+        for g in GOOD_KEYS:
+            p.industry[g] = 0.0
     for p in provs:
         for g in GOOD_KEYS:
             # start each province near its target cover so year 1 is not a crisis
@@ -722,6 +726,8 @@ class Game:
                 p.stocks[g] = max(0.0, p.stocks[g] - p.consumption(g))
                 p.stocks[g] *= GOODS[g].carry   # spoilage / carrying loss
 
+        self._invest()
+
         # arbitrage: capitalists move goods where the spread beats freight.
         # sight is limited — provinces with no bourgeoisie are invisible to capital.
         for g in GOOD_KEYS:
@@ -747,6 +753,48 @@ class Game:
         for p in self.provs:
             w = welfare(p)
             p.unrest = max(0.0, min(1.0, p.unrest * 0.75 + (0.75 - w) * 1.1))
+
+    def _invest(self):
+        """Increasing returns. Main doc §14: agglomeration is not a new system, it is
+        labour pooling + supplier networks + spillover, which are the three networks
+        already built with the distance term set to nearly zero. So the whole term is
+        EXISTING CONCENTRATION, and it compounds — which is what makes the century's
+        industrial geography path-dependent rather than a function of the trend."""
+        INDUSTRIAL = ("coal", "iron", "cloth")
+        pool = sum(p.pop for p in self.provs if p.key not in self.lost_provinces) * 0.011
+        cands = []
+        for p in self.provs:
+            if p.key in self.lost_provinces:
+                continue
+            congestion = 1.0 + 1.9 * sum(p.industry.values())      # rent, wages, coal, cholera
+            for g in INDUSTRIAL:
+                if p.capacity[g] <= 0.01:
+                    continue
+                ob = self.beliefs.get_price(p.key, g)
+                signal = (ob.value if ob else GOODS[g].ref_price) / GOODS[g].ref_price
+                cluster = 1.0 + 2.4 * p.industry[g]               # the compounding term
+                # a capitalist cannot invest where nobody is standing (main doc §8)
+                sight = p.bourgeoisie
+                # early flows are near-random and then lock in (main doc §13, on
+                # corridors — the same logic governs where an industry settles). Without
+                # this the largest starting bourgeoisie wins every seed, which is a trend,
+                # not a path.
+                luck = self.rng.uniform(0.55, 1.65)
+                score = signal * cluster * (0.25 + sight) * luck / congestion
+                if score > 0.01:
+                    cands.append((score, p, g))
+        tot = sum(c[0] for c in cands)
+        if tot <= 0:
+            return
+        for score, p, g in cands:
+            p.industry[g] += pool * (score / tot) * 0.055
+            p.capacity[g] = p.capacity[g] * (1.0 + pool * (score / tot) * 0.045)
+        # industry makes a bourgeoisie, and a bourgeoisie makes the province visible
+        for p in self.provs:
+            if p.key in self.lost_provinces:
+                continue
+            ind = sum(p.industry.values())
+            p.bourgeoisie = min(0.95, p.bourgeoisie + ind * 0.010)
 
     def _events(self, y: int):
         for p in self.provs:
@@ -994,7 +1042,8 @@ class Game:
             "unlocked": sorted(self.unlocked),
             "provs": [{"key": p.key, "pop": p.pop, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
-                       "unrest": p.unrest, "stocks": p.stocks, "capacity": p.capacity}
+                       "unrest": p.unrest, "stocks": p.stocks, "capacity": p.capacity,
+                       "industry": p.industry, "bourgeoisie": p.bourgeoisie}
                       for p in self.provs],
             "settlement": [{"key": h.key, "consent": h.consent,
                             "price_cost": h.price_cost, "overridden": h.overridden}
@@ -1027,7 +1076,8 @@ class Game:
         g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
-            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "stocks", "capacity"):
+            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "stocks", "capacity",
+                      "industry", "bourgeoisie"):
                 setattr(p, k, pd[k])
         for hd in d["settlement"]:
             h = g.holder[hd["key"]]
