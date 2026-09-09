@@ -433,10 +433,10 @@ TAXES = [
         0.00, 138.0, "everyone, and hardest on the poor"),
     Tax("land", "Land tax",
         "Assessed on the cadastre. Survey once, then it stays roughly true.",
-        0.38, 170.0, "the countryside"),
+        0.46, 170.0, "the countryside"),
     Tax("income", "Income tax",
         "Continuous, adversarial, and it needs a literate inspectorate.",
-        0.72, 236.0, "where the money is"),
+        0.68, 236.0, "where the money is"),
 ]
 
 
@@ -630,7 +630,12 @@ class Game:
             return v
         if link == "legibility":
             # the parish register was the census apparatus long before the state had one
-            return min(1.0, 0.10 + self.register_quality * 1.6 + self.supplied("legibility"))
+            # Was 0.10 + register*1.6 + supplied, which reached the 1.0 cap by year 3 in
+            # every playstyle — so legibility stopped binding anything, and it could not
+            # gate the fiscal ladder at all (all three tax tiers were available by 1651).
+            # Seeing your own country is meant to be the hard, slow thing.
+            return min(1.0, 0.05 + self.register_quality * 0.85
+                       + self.supplied("legibility") * 0.5)
         if link == "compliance":
             if line_key == "land":
                 # the moral economy: commons, gleaning and wood-gathering were a real
