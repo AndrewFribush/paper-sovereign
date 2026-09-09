@@ -320,6 +320,48 @@ def build_settlement() -> list:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Statistical categories — main doc §5. Some things are not unknown, they are
+# UNASKABLE: the concept required to collect them has not been invented. Each
+# unlock opens a class of question the state could not previously pose, gives a
+# new instrument, and usually delivers an unpleasant surprise about the number.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Category:
+    key: str
+    name: str
+    needs: str            # institution gating it
+    level: float
+    blurb: str
+    reveal: list          # what the state learns, and wishes it had not
+
+CATEGORIES = [
+    Category("returns", "Trade returns", "clerks", 0.72,
+             "Prices reported from provinces with no merchant of their own.",
+             ["THE BOARD OF TRADE IS ESTABLISHED", "",
+              "Until now you have read prices only where somebody had a reason",
+              "to quote them. The dark provinces were dark because nobody there",
+              "was trading on their own account.", "",
+              "Your clerks will now collect returns from every district you hold.",
+              "You will not like all of them."]),
+    Category("vital", "Vital registration", "register", 0.80,
+             "Births and burials. The population figure stops drifting between counts.",
+             ["CIVIL REGISTRATION BEGINS", "",
+              "Baptisms, marriages and burials were the church's books, and you",
+              "read them only by its leave. Now they are yours.", "",
+              "Your population figure will no longer go stale between counts —",
+              "it will be corrected every year, by arithmetic you own."]),
+    Category("cost", "Cost of living", "clerks", 0.92,
+             "Wages against prices. You can finally see who is being priced out.",
+             ["A COST-OF-LIVING INDEX IS CONSTRUCTED", "",
+              "You have always been able to see that grain was dear. You have",
+              "never been able to see what that meant for a labourer's week.", "",
+              "Now you can. The number has a name, so it can be demanded to fall,",
+              "and you have created a public that knows to demand it."]),
+]
+
+
 @dataclass
 class ChainResult:
     line: str
@@ -367,8 +409,10 @@ class Game:
         self.threat = 0.35           # the Tilly clock
         self.war_in = 8              # years until the neighbour is ready
         self.lost_provinces: list[str] = []
+        self.admin_load = 1.0
         self.taught = False
         self.notice: list = []   # a thing the player must actually be made to read
+        self.unlocked: set = set()
         self.game_over = False
         self.ending = ""
 
@@ -398,7 +442,7 @@ class Game:
         if link == "reach":
             tot = sum(1.0 / p.freight() for p in self.provs)
             best = sum(1.0 / (p.base_freight * 0.25) for p in self.provs)
-            return max(0.15, min(1.0, tot / best + self.supplied("reach")))
+            return max(0.12, min(1.0, (tot / best + self.supplied("reach")) / max(1.0, self.admin_load ** 0.8)))
         if link == "consent":
             v = 1.0
             for h in self.settlement:
@@ -546,6 +590,7 @@ class Game:
         self._events(y)
         self._reports(y)
         self._early_lesson(y)
+        self._categories(y)
         self._tilly(y)
 
         # 3. decay
@@ -619,6 +664,13 @@ class Game:
             climate = self.rng.uniform(0.62, 0.80)
             self.log.append("A cold, wet year. The harvest is short across the country.")
         # population grows, so every count starts going stale the day it is taken
+        # vital registration keeps the population figure from drifting between counts
+        if "vital" in self.unlocked:
+            for p in self.provs:
+                o = self.beliefs.pop.get(p.key)
+                if o:
+                    drift = 0.30 * (p.pop - o.value)
+                    self.beliefs.pop[p.key] = Obs(o.value + drift, self.year, "registrar")
         for p in self.provs:
             if p.key in self.lost_provinces:
                 continue
@@ -678,7 +730,8 @@ class Game:
         """Channels with different latencies and biases. Never reconciled."""
         for p in self.provs:
             # prices: honest, but only where there is trade and reach
-            if p.bourgeoisie > 0.15 and self.rng.random() < 0.9 - p.freight() * 0.2:
+            visible = p.bourgeoisie > 0.15 or "returns" in self.unlocked
+            if visible and self.rng.random() < 0.9 - p.freight() * 0.2:
                 for g in GOOD_KEYS:
                     self.beliefs.price[(p.key, g)] = Obs(price_of(p, g), y, "market")
                     self.beliefs.push(p.key, g, y, price_of(p, g))
@@ -727,6 +780,17 @@ class Game:
             "A census would settle it. So would a railway. You cannot afford both.",
         ]
 
+    def _categories(self, y: int):
+        """A category is not a bonus. It is a question you could not previously ask."""
+        for c in CATEGORIES:
+            if c.key in self.unlocked:
+                continue
+            have = {"clerks": self.clerks, "register": self.register_quality}[c.needs]
+            if have >= c.level:
+                self.unlocked.add(c.key)
+                self.notice = list(c.reveal)
+                return
+
     def _tilly(self, y: int):
         self.war_in -= 1
         if self.war_in == 2:
@@ -750,12 +814,14 @@ class Game:
 
     # -- save / load ------------------------------------------------------
     SCALARS = ("year turn treasury reserve_grain rail_progress clerks masters engineers "
-               "register_quality army credit threat war_in game_over ending taught").split()
+               "register_quality army credit threat war_in game_over ending taught admin_load").split()
+    # `unlocked` is a set, handled separately in to_dict/load
 
     def to_dict(self) -> dict:
         return {
             "scalars": {k: getattr(self, k) for k in self.SCALARS},
             "lost": self.lost_provinces,
+            "unlocked": sorted(self.unlocked),
             "provs": [{"key": p.key, "pop": p.pop, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
                        "unrest": p.unrest, "stocks": p.stocks, "capacity": p.capacity}
@@ -788,6 +854,7 @@ class Game:
         for k, v in d["scalars"].items():
             setattr(g, k, v)
         g.lost_provinces = d["lost"]
+        g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
             for k in ("pop", "literacy", "base_freight", "railed", "unrest", "stocks", "capacity"):
