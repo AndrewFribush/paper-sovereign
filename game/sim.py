@@ -17,6 +17,8 @@ The thesis being tested (main doc §21):
 from __future__ import annotations
 import json, math, os, random
 from statistics import mean as st_mean
+
+from game.graph import build_network
 from dataclasses import dataclass, field
 
 RED_FLAG = 9.99
@@ -91,10 +93,16 @@ class Province:
     clergy_strength: float = 0.0
     noble_strength: float = 0.0
 
+    # set each tick from the cost flood; base_freight survives only as the fallback
+    # used before a network exists and as the seed for map content.
+    flood_cost: float = 0.0
+
     def freight(self) -> float:
+        if self.flood_cost > 0.0:
+            return max(0.05, self.flood_cost)
         f = self.base_freight
         if self.water:
-            f *= 0.35          # water flattens the map (main doc §4)
+            f *= 0.35
         if self.railed:
             f *= 0.30
         return max(0.05, f)
@@ -479,6 +487,10 @@ class Game:
         self.threat = 0.35           # the Tilly clock
         self.war_in = 8              # years until the neighbour is ready
         self.lost_provinces: list[str] = []
+        self.network = build_network(self.provs)
+        self.blockaded: set = set()
+        self._pairs: dict = {}
+        self._reflood()
         self.admin_load = 1.0
         self.taught = False
         self.notice: list = []   # a thing the player must actually be made to read
@@ -503,6 +515,22 @@ class Game:
         self.log.append(f"{self.year}. You inherit a treasury, an army, and a map you did not draw.")
 
     # -- links ------------------------------------------------------------
+    def pair_cost(self, a: str, b: str) -> float:
+        """Freight between two markets — what arbitrage actually pays."""
+        return self._pairs.get((a, b), 40.0)
+
+    def _reflood(self, month: int = 6):
+        """One multi-source Dijkstra gives every province its access cost. Called
+        whenever the network changes: a line completes, a port is blockaded, a
+        province is lost, or the season turns."""
+        self.network.invalidate()
+        costs = self.network.flood(month=month, blockaded=self.blockaded,
+                                   lost=set(self.lost_provinces))
+        self._pairs = self.network.pairwise(month=month, blockaded=self.blockaded,
+                                            lost=set(self.lost_provinces))
+        for k, c in costs.items():
+            self.by_key[k].flood_cost = c
+
     def link_value(self, line_key: str, link: str) -> float:
         """0..1 strength of one link for one instrument."""
         if link == "money":
@@ -667,6 +695,7 @@ class Game:
             self.budget[k] = 0.0
 
         # 2. world tick
+        self._reflood()
         self._economy(y)
         self._events(y)
         self._reports(y)
@@ -721,6 +750,7 @@ class Game:
                     self.rail_progress -= 2.5
                     p.railed = True
                     self.log.append(f"The line reaches {p.name}.")
+                    self._reflood()
                 else:
                     break
         elif key == "schools":
@@ -794,23 +824,33 @@ class Game:
         # arbitrage: capitalists move goods where the spread beats freight.
         # sight is limited — provinces with no bourgeoisie are invisible to capital.
         for g in GOOD_KEYS:
-            seen = [p for p in self.provs if p.bourgeoisie > 0.15]
-            for _ in range(16):
-                if len(seen) < 2:
+            # Every pair, not just the global extremes. Trading only min-against-max
+            # makes the residual dispersion a function of ONE pair's freight cost, so
+            # a line built between any other two provinces changes nothing between
+            # them — the transport graph works and the price model cannot feel it.
+            # At this province count all-pairs is free; at scale this is the greedy
+            # priority pass the design specifies instead of a global solver.
+            seen = [p for p in self.provs
+                    if p.bourgeoisie > 0.15 and p.key not in self.lost_provinces]
+            for _ in range(4):
+                trades = []
+                for i, a in enumerate(seen):
+                    for b in seen[i + 1:]:
+                        pa, pb = price_of(a, g), price_of(b, g)
+                        lo, hi = (a, b) if pa < pb else (b, a)
+                        spread = abs(pa - pb)
+                        cost = self.pair_cost(lo.key, hi.key) * 2.6
+                        if spread > cost:
+                            trades.append((spread - cost, lo, hi))
+                if not trades:
                     break
-                lo = min(seen, key=lambda p: price_of(p, g))
-                hi = max(seen, key=lambda p: price_of(p, g))
-                if lo is hi:
-                    break
-                spread = price_of(hi, g) - price_of(lo, g)
-                cost = (lo.freight() + hi.freight()) * 3.0
-                if spread <= cost:
-                    break
-                move = min(lo.stocks[g] * 0.32, hi.consumption(g) * 0.85)
-                if move <= 0:
-                    break
-                lo.stocks[g] -= move
-                hi.stocks[g] += move * 0.96
+                trades.sort(key=lambda t: -t[0])
+                for _profit, lo, hi in trades:
+                    move = min(lo.stocks[g] * 0.22, hi.consumption(g) * 0.55)
+                    if move <= 0:
+                        continue
+                    lo.stocks[g] -= move
+                    hi.stocks[g] += move * 0.96
 
         # unrest follows unmet need, weighted to grain
         for p in self.provs:
@@ -1087,6 +1127,7 @@ class Game:
                 lost = [p for p in self.provs if p.key not in self.lost_provinces][-1]
                 self.lost_provinces.append(lost.key)
                 self.log.append(f"WAR. The army was not enough. {lost.name} is ceded.")
+                self._reflood()
                 self.treasury = max(0, self.treasury - 150)
                 self.credit *= 0.8
                 self.holder['estates'].consent = max(0.05, self.holder['estates'].consent - 0.15)
@@ -1107,7 +1148,7 @@ class Game:
             "unlocked": sorted(self.unlocked),
             "provs": [{"key": p.key, "pop": p.pop, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
-                       "unrest": p.unrest, "grievance": p.grievance, "stocks": p.stocks, "capacity": p.capacity,
+                       "unrest": p.unrest, "grievance": p.grievance, "flood_cost": p.flood_cost, "stocks": p.stocks, "capacity": p.capacity,
                        "industry": p.industry, "bourgeoisie": p.bourgeoisie}
                       for p in self.provs],
             "settlement": [{"key": h.key, "consent": h.consent,
@@ -1141,7 +1182,7 @@ class Game:
         g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
-            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "grievance", "stocks", "capacity",
+            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "grievance", "flood_cost", "stocks", "capacity",
                       "industry", "bourgeoisie"):
                 setattr(p, k, pd[k])
         for hd in d["settlement"]:
