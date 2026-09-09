@@ -52,6 +52,8 @@ class UI:
         self.hover_prov = None
         self.detail = None
         self.politics = False
+        self.ledger = False
+        self.intro = True
         self.btn: dict = {}
         self.prov_rects: dict = {}
 
@@ -237,6 +239,141 @@ class UI:
                f"{(1.0 - p.freight() * 0.22) * 100:.0f}% of it would arrive here",
                rr.right + 16, rr.y + 8, self.f_sm, STALE)
 
+    def draw_notice(self):
+        s = pygame.Surface((W, H)); s.set_alpha(232); s.fill(PARCH)
+        self.screen.blit(s, (0, 0))
+        box = pygame.Rect(210, 130, 860, 540)
+        pygame.draw.rect(self.screen, PARCH_DK, box, border_radius=4)
+        pygame.draw.rect(self.screen, GOLD, box, 2, border_radius=4)
+        x, y = box.x + 44, box.y + 40
+        for i, line in enumerate(self.g.notice):
+            if i == 0:
+                self.t(line, x, y, self.f_h2, KNOWN); y += 40
+                self.rule(x, y - 12, box.width - 88)
+            else:
+                self.t(line, x, y, self.f, INK if line else STALE)
+                y += 24 if line else 10
+        self.t("ENTER to go on", x, box.bottom - 42, self.f_sm, GOLD)
+
+    def draw_brief(self):
+        self.screen.fill(PARCH)
+        x = 150
+        self.t("VICKY", x, 96, self.f_h1, KNOWN)
+        self.t("a government that cannot see its own country", x, 138, self.f_h2, STALE)
+        self.rule(x, 176, 900)
+        lines = [
+            ("", 0),
+            ("You are a state, in 1650. You do not build things. You fund them,", 0),
+            ("and whether the money becomes anything depends on a chain of people", 0),
+            ("and institutions you mostly do not own.", 0),
+            ("", 0),
+            ("The rule everything runs on:", 1),
+            ("What exists where is common knowledge. Everyone knows Newcastle has coal.", 2),
+            ("How many, how much, and at what price are measurements — and measurements", 2),
+            ("cost money, arrive late, and are made by people with their own interests.", 2),
+            ("", 0),
+            ("So the numbers you are shown are not the numbers that are true.", 1),
+            ("They carry a source and a date. Read both.", 2),
+            ("", 0),
+            ("Press F1 at any moment to see what is actually happening underneath.", 1),
+            ("It is not cheating. It is there so you can tell a lie from a bug.", 2),
+            ("", 0),
+        ]
+        y = 200
+        for text, kind in lines:
+            f = self.f_h2 if kind == 1 else self.f
+            col = KNOWN if kind <= 1 else STALE
+            self.t(text, x + (24 if kind == 2 else 0), y, f, col)
+            y += 26 if text else 12
+        self.rule(x, y + 8, 900)
+        y += 26
+        keys = [("ENTER", "begin, and end each year"), ("click a province", "prices on file, and the clerk's note"),
+                ("T", "the ledger — every province at once"), ("P", "the settlement — who can block you"),
+                ("F1", "the truth")]
+        for k, v in keys:
+            self.t(k, x, y, self.f, GOLD); self.t(v, x + 150, y, self.f_sm, STALE); y += 22
+        self.t("Press ENTER to begin.", x, y + 22, self.f_h2, KNOWN)
+
+    def draw_ledger(self):
+        """The spread, all at once. Diagnosis is reading ACROSS provinces and goods —
+        one province at a time cannot show you 'here' versus 'everywhere'."""
+        g = self.g
+        panel = pygame.Rect(24, 96, 654, 528)
+        pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
+        pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
+        x, y = panel.x + 16, panel.y + 12
+        self.t("THE LEDGER", x, y, self.f_h1, KNOWN)
+        self.tr("T to close", panel.right - 16, y + 12, self.f_sm, STALE)
+        y += 40
+        self.t("Everything the state has on file, side by side. Dearest first.",
+               x, y, self.f_sm, STALE)
+        y += 24
+
+        cols = [("Province", 0), ("Subjects", 132), ("age", 210),
+                ("Grain", 262), ("Coal", 336), ("Iron", 402), ("Cloth", 468), ("Wage", 540)]
+        for label, dx in cols:
+            self.t(label, x + dx, y, self.f_sm, STALE)
+        y += 16
+        self.rule(x, y, panel.width - 32); y += 8
+
+        live = [p for p in g.provs if p.key not in g.lost_provinces]
+        def grain(p):
+            o = g.beliefs.get_price(p.key, "grain")
+            return o.value if o else -1.0
+        live.sort(key=grain, reverse=True)
+
+        for p in live:
+            self.t(p.name, x, y, self.f, KNOWN)
+            ob = g.beliefs.get_pop(p.key)
+            if ob:
+                self.t(f"{ob.value*1000:,.0f}", x + 132, y, self.f_sm, BELIEVED)
+                a = ob.age(g.year)
+                self.t(f"{a}y", x + 210, y, self.f_sm, RED if a > 25 else STALE)
+            else:
+                self.t("numerous", x + 132, y, self.f_sm, STALE)
+            for gk, dx in (("grain", 262), ("coal", 336), ("iron", 402), ("cloth", 468)):
+                o = g.beliefs.get_price(p.key, gk)
+                ref = GOODS[gk].ref_price
+                if not o:
+                    self.t("—", x + dx, y, self.f_sm, STALE)
+                    continue
+                r = o.value / ref
+                col = RED if r > 1.45 else (GOLD if r > 1.15 else
+                                            (GREEN if r < 0.8 else BELIEVED))
+                self.t(f"{o.value:,.1f}", x + dx, y, self.f_sm, col)
+                if g.year - o.year > 1:
+                    self.t(f"'{o.year % 100:02d}", x + dx + 40, y + 2, self.f_sm, STALE)
+            wh = g.beliefs.wage_hist.get(p.key, [])
+            self.t(f"{wh[-1][1]:,.1f}" if wh else "—", x + 540, y, self.f_sm,
+                   BELIEVED if wh else STALE)
+            if self.inspector:
+                self.tr(f"{price_of(p,'grain'):,.0f}", panel.right - 14, y, self.f_sm, TRUTH)
+            y += 22
+
+        y += 6
+        self.rule(x, y, panel.width - 32); y += 10
+        vals = [g.beliefs.get_price(p.key, "grain") for p in live]
+        vals = [o.value for o in vals if o]
+        if vals:
+            lo, hi = min(vals), max(vals)
+            self.t("Grain, across the country", x, y, self.f_sm, STALE)
+            self.t(f"{lo:,.1f} to {hi:,.1f}", x + 200, y, self.f, KNOWN)
+            self.t(f"spread {hi/max(0.01,lo):,.1f}x", x + 320, y, self.f_sm,
+                   RED if hi / max(0.01, lo) > 6 else GOLD)
+            y += 22
+            n = sum(1 for v in vals if v > GOODS["grain"].ref_price * 1.45)
+            if n >= len(vals) * 0.6:
+                msg = "Dear almost everywhere: a general failure, or the money."
+            elif n:
+                msg = f"Dear in {n} of {len(vals)} on file: local. Check the roads in."
+            else:
+                msg = "Nothing on file looks like a dearth."
+            self.t(msg, x, y, self.f_sm, INK)
+            y += 20
+        missing = [p.name for p in live if not g.beliefs.get_price(p.key, "grain")]
+        if missing:
+            self.t(f"No return at all from: {', '.join(missing)}", x, y, self.f_sm, RED)
+
     def draw_politics(self):
         g = self.g
         panel = pygame.Rect(24, 96, 654, 528)
@@ -357,7 +494,7 @@ class UI:
             self.t(line, 30, y, self.f_sm, INK)
             y += 18
 
-        self.tr("F1 truth   P politics   S/L save·load   click a province   ↑↓ select   ←→ fund   ENTER end year", W - 30, H - 26,
+        self.tr("F1 truth   T ledger   P politics   S/L save   click a province   ENTER end year", W - 30, H - 26,
                 self.f_sm, STALE)
         if self.inspector:
             self.t("GROUND TRUTH  ·  red = simulation, not the state's belief", 30, H - 26, self.f_sm, TRUTH)
@@ -401,10 +538,21 @@ class UI:
                 if e.type == pygame.QUIT:
                     return
                 if e.type == pygame.KEYDOWN:
+                    if self.g.notice:
+                        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            self.g.notice = []
+                        continue
+                    if self.intro:
+                        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                            self.intro = False
+                        elif e.key == pygame.K_ESCAPE:
+                            return
+                        continue
                     if e.key == pygame.K_ESCAPE:
-                        if self.detail or self.politics:
+                        if self.detail or self.politics or self.ledger:
                             self.detail = None
                             self.politics = False
+                            self.ledger = False
                             continue
                         return
                     if e.key == pygame.K_F1:
@@ -419,7 +567,10 @@ class UI:
                             self.g.log.insert(0, "Loaded.")
                     if e.key == pygame.K_p:
                         self.politics = not self.politics
-                        self.detail = None
+                        self.detail = None; self.ledger = False
+                    if e.key == pygame.K_t:
+                        self.ledger = not self.ledger
+                        self.detail = None; self.politics = False
                     if self.g.game_over:
                         continue
                     if e.key in (pygame.K_DOWN, pygame.K_j):
@@ -435,7 +586,8 @@ class UI:
                         self.g.end_turn()
                         if not self.g.game_over:
                             self.g.collect()
-                if e.type == pygame.MOUSEBUTTONDOWN and not self.g.game_over:
+                if (e.type == pygame.MOUSEBUTTONDOWN and not self.g.game_over
+                        and not self.intro and not self.g.notice):
                     mx, my = e.pos
                     if mx >= 694:                       # the appropriations column
                         for i, line in enumerate(LINES):
@@ -467,14 +619,20 @@ class UI:
                                 break
 
             self.screen.fill(PARCH)
+            if self.intro:
+                self.draw_brief()
+                pygame.display.flip(); self.clock.tick(60); continue
             if self.g.game_over:
                 self.draw_end()
             else:
                 self.draw_header()
                 if self.politics: self.draw_politics()
+                elif self.ledger: self.draw_ledger()
                 elif self.detail: self.draw_detail()
                 else: self.draw_map()
                 self.draw_budget(); self.draw_log()
+            if self.g.notice:
+                self.draw_notice()
             pygame.display.flip()
             self.clock.tick(60)
 

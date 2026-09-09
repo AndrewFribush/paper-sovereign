@@ -55,7 +55,7 @@ class Good:
 
 GOODS = {
     g.key: g for g in [
-        Good("grain", "Grain", 10.0, 1.9, 1.0, 0.35, 6.0, 0.88),  # the moral-economy good
+        Good("grain", "Grain", 10.0, 1.9, 1.0, 0.30, 14.0, 0.88),  # the moral-economy good
         Good("coal",  "Coal",   6.0, 1.0, 0.6, 0.45, 3.5, 0.90),
         Good("iron",  "Iron",  14.0, 1.1, 0.7, 0.45, 3.5, 0.94),
         Good("cloth", "Cloth", 20.0, 0.7, 0.5, 0.55, 2.8, 0.92),
@@ -364,6 +364,8 @@ class Game:
         self.threat = 0.35           # the Tilly clock
         self.war_in = 8              # years until the neighbour is ready
         self.lost_provinces: list[str] = []
+        self.taught = False
+        self.notice: list = []   # a thing the player must actually be made to read
         self.game_over = False
         self.ending = ""
 
@@ -538,6 +540,7 @@ class Game:
         self._economy(y)
         self._events(y)
         self._reports(y)
+        self._early_lesson(y)
         self._tilly(y)
 
         # 3. decay
@@ -607,8 +610,8 @@ class Game:
     def _economy(self, y: int):
         # climate: a slow global multiplier with excursions (main doc §20)
         climate = 1.0
-        if y in (1657, 1658, 1659, 1672, 1685, 1694, 1695):
-            climate = self.rng.uniform(0.55, 0.75)
+        if y in (1657, 1658, 1665, 1672, 1685, 1694, 1695):
+            climate = self.rng.uniform(0.62, 0.80)
             self.log.append("A cold, wet year. The harvest is short across the country.")
         # population grows, so every count starts going stale the day it is taken
         for p in self.provs:
@@ -681,6 +684,44 @@ class Game:
                 self.beliefs.output[p.key] = Obs(p.stocks["grain"] * infl, y, "governor")
                 self.beliefs.unrest[p.key] = Obs(p.unrest * (1.0 - p.noble_strength * 0.55), y, "governor")
 
+    def _early_lesson(self, y: int):
+        """Year 2: the receipts contradict the register. Costs the player almost nothing
+        and teaches the one rule the whole game runs on."""
+        if self.turn != 1 or self.taught:
+            return
+        worst, gap = None, 0.0
+        for p in self.provs:
+            o = self.beliefs.pop.get(p.key)
+            if not o or o.value <= 0:
+                continue
+            d = (p.pop - o.value) / o.value
+            if abs(d) > abs(gap):
+                worst, gap = p, d
+        if not worst or abs(gap) < 0.08:
+            return
+        self.taught = True
+        o = self.beliefs.pop[worst.key]
+        implied = o.value * (1.0 + gap * self.rng.uniform(0.55, 0.8))
+        self.notice = [
+            "THE RECEIPTS DO NOT AGREE WITH THE REGISTER",
+            "",
+            f"The excise returns from {worst.name} have come in.",
+            "",
+            f"Your register says {o.value*1000:,.0f} souls. It is a {o.source} of {o.year},",
+            f"{self.year - o.year} years old, and nobody has counted them since.",
+            "",
+            f"The receipts imply nearer {implied*1000:,.0f}.",
+            "",
+            "You are not being told the true figure. You are being told",
+            "that your figure is wrong, by a channel that had no reason to lie:",
+            "the money actually collected.",
+            "",
+            "Reports are fast and self-serving. Receipts are slow and roughly honest.",
+            "Prices are residue — what is left behind by people who can see what you cannot.",
+            "",
+            "A census would settle it. So would a railway. You cannot afford both.",
+        ]
+
     def _tilly(self, y: int):
         self.war_in -= 1
         if self.war_in == 2:
@@ -704,7 +745,7 @@ class Game:
 
     # -- save / load ------------------------------------------------------
     SCALARS = ("year turn treasury reserve_grain rail_progress clerks masters engineers "
-               "register_quality army credit threat war_in game_over ending").split()
+               "register_quality army credit threat war_in game_over ending taught").split()
 
     def to_dict(self) -> dict:
         return {
