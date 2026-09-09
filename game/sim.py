@@ -811,7 +811,7 @@ class Game:
         A census of fourteen counties costs more than a census of eight.
         """
         held = sum(1 for p in self.provs if p.key not in self.lost_provinces)
-        return LINE_BY_KEY[line_key].unit_cost * 0.25
+        return LINE_BY_KEY[line_key].unit_cost * (held / 8.0) ** 0.85
 
     def preview(self, line_key: str) -> tuple[str, float]:
         """Binding link and its value — shown BEFORE committing. Transparent about mechanism."""

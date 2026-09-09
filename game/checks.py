@@ -350,8 +350,12 @@ def mechanism():
         return abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())
     es = st.mean(err(play(s, seeing)[0]) for s in SEEDS)
     eb = st.mean(err(play(s, blind)[0]) for s in SEEDS)
-    check("funding the census sharpens the state's belief", es < eb * 0.6,
-          f"{es*100:.1f}% vs {eb*100:.1f}% error")
+    # Threshold from measurement: with the census correction disabled the ratio is
+    # 0.40, because vital registration is a SECOND path to belief correction and a
+    # census-heavy state unlocks it anyway. At 0.60 the check could not tell the two
+    # apart. Working code sits at 0.26.
+    check("funding the census sharpens the state's belief", es < eb * 0.34,
+          f"{es*100:.1f}% vs {eb*100:.1f}% error (ratio {es/max(1e-6,eb):.2f})")
 
     # Overriding the church must destroy the STOCK you were standing on, not merely
     # remove future help — and the sequencing rule (build the registry first, then

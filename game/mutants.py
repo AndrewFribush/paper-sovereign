@@ -47,10 +47,11 @@ MUTANTS = [
      '    LOCAL = {"iron": 0.75, "grain": 0.35, "cloth": 0.30, "coal": 0.18, "munit": 0.30}',
      '    LOCAL = {}'),
 
-    # Retired: with per-deduction clamps in place as well, removing this one line no
-    # longer produces a negative balance, so the mutation tests nothing. Kept as a
-    # comment rather than deleted, because the bug it stood for was real and severe.
-    ("treasury may go negative",
+    # REDUNDANT DEFENCE, not a hole. Appropriations are already scaled down to the
+    # treasury before anything is spent, so `spent <= treasury` holds without this
+    # clamp and removing it cannot produce a negative balance. The clamp stays as
+    # defence in depth; the mutation is kept, marked, and expected to be missed.
+    ("treasury may go negative (redundant clamp — expected miss)",
      "            self.treasury = max(0.0, self.treasury - spent)",
      "            self.treasury -= spent"),
 
@@ -84,7 +85,18 @@ def run_suite() -> tuple[bool, str]:
     return r.returncode != 0, "; ".join(f[6:].split("  ")[0] for f in fails[:2])
 
 
+LOCK = ".mutants.lock"
+
+
 def main():
+    # This rewrites game/sim.py in place. Anything else that reads or commits the tree
+    # while it runs sees a MUTATED file — a `git add -A` during a run committed a
+    # deliberately broken railway, and a concurrent `checks` run reported seven false
+    # failures. The lock makes that impossible rather than merely unlikely.
+    if os.path.exists(LOCK):
+        print("A mutation run is already in progress (.mutants.lock). Refusing to start.")
+        sys.exit(2)
+    open(LOCK, "w").write(str(os.getpid()))
     backup = tempfile.mktemp(suffix=".py")
     shutil.copy(SIM, backup)
     src = open(SIM).read()
@@ -108,10 +120,15 @@ def main():
     finally:
         shutil.copy(backup, SIM)
         os.unlink(backup)
+        if os.path.exists(LOCK):
+            os.unlink(LOCK)
 
     print()
+    real = [m for m in missed if "expected miss" not in m]
     if missed:
         print(f"{len(missed)} of {len(MUTANTS)} not caught: " + ", ".join(missed))
+    if real:
+        print(f"  -> {len(real)} of those are holes in the harness")
         sys.exit(1)
     print(f"all {len(MUTANTS)} regressions are caught by the suite")
 
