@@ -136,5 +136,90 @@ def main():
             print(f"         '{k}' {100*v/total_years:.0f}%")
 
 
+def thresholds():
+    """Every hardcoded gate, and how often it actually fires.
+
+    A threshold calibrated against a broken system dies silently when you fix it —
+    the dearth trigger sat at 3.4x reference while prices were oscillating noise, and
+    once the market cleared it became unreachable and the crisis stopped existing with
+    nothing failing. So: measure every gate's firing rate. 0% means dead content, 100%
+    means the gate is not a gate.
+    """
+    from game.sim import Game, GOODS, price_of, welfare
+
+    hits = Counter()
+    tot = Counter()
+
+    def gate(name, cond, live=True):
+        tot[name] += 1
+        if cond:
+            hits[name] += 1
+
+    for seed in range(1, 13):
+        g = Game(seed)
+        g.collect()
+        while not g.game_over:
+            if g.crisis:
+                g.choose(g.crisis.choices[0].key)
+                continue
+            t = g.treasury
+            for k, v in dict(census=.18, army=.26, normal=.14, granary=.12,
+                             land=.12, railway=.10, schools=.08).items():
+                g.budget[k] = t * v
+            g.end_turn()
+            g.notice = []
+            if not g.game_over:
+                g.collect()
+            live = [p for p in g.provs if p.key not in g.lost_provinces]
+            ref = GOODS["grain"].ref_price
+            mean_p = st.mean(price_of(p, "grain") for p in live)
+            urban = sum(p.pop * p.bourgeoisie for p in live) / max(1e-6, sum(p.pop for p in live))
+
+            gate("crisis: dearth cond", mean_p > ref * 2.0 and g.mean_welfare() < 0.78)
+            gate("crisis: cholera cond", g.year >= 1654 and urban > 0.38)
+            gate("crisis: sedition cond",
+                 g.mean_literacy() > 0.20 and st.mean(p.unrest for p in live) > 0.16)
+            gate("riot: unrest > .78", any(p.unrest > 0.78 for p in live))
+            gate("diagnose: 'dear' (1.45x)", any(price_of(p, "grain") > ref * 1.45 for p in live))
+            gate("ui: province red (1.6x)", any(price_of(p, "grain") > ref * 1.6 for p in live))
+            gate("ui: belief stale (>12y)",
+                 any((o := g.beliefs.pop.get(p.key)) and o.age(g.year) > 12 for p in live))
+            gate("ui: belief ancient (>25y)",
+                 any((o := g.beliefs.pop.get(p.key)) and o.age(g.year) > 25 for p in live))
+            gate("sight: province invisible", any(p.bourgeoisie <= 0.15 for p in live))
+            gate("nudge: consent binds 3+",
+                 sum(1 for l in LINES if g.preview(l.key)[0] == "consent") >= 3)
+            gate("supply: clamped high", any(
+                (price_of(p, q) / GOODS[q].ref_price) ** (0.35 if q == "grain" else 0.55) > 1.6
+                for p in live for q in GOOD_KEYS))
+            gate("supply: clamped low", any(
+                (price_of(p, q) / GOODS[q].ref_price) ** (0.35 if q == "grain" else 0.55) < 0.55
+                for p in live for q in GOOD_KEYS))
+            gate("price: at floor", any(
+                price_of(p, q) <= GOODS[q].ref_price * GOODS[q].floor * 1.001
+                for p in live for q in GOOD_KEYS))
+            gate("price: at ceiling", any(
+                price_of(p, q) >= GOODS[q].ref_price * GOODS[q].ceiling * 0.999
+                for p in live for q in GOOD_KEYS))
+            gate("welfare: below .5", any(welfare(p) < 0.5 for p in live))
+
+    print("\nTHRESHOLDS  (0% is dead content; 100% means the gate is not a gate)")
+    bad = []
+    for name in sorted(tot):
+        r = 100 * hits[name] / max(1, tot[name])
+        flag = ""
+        if r < 1.0:
+            flag = "  <-- DEAD"
+            bad.append(name)
+        elif r > 97.0:
+            flag = "  <-- ALWAYS TRUE"
+            bad.append(name)
+        print(f"  {r:5.1f}%  {name}{flag}")
+    if not bad:
+        print("\n  every gate fires sometimes and not always")
+    return bad
+
+
 if __name__ == "__main__":
     main()
+    thresholds()

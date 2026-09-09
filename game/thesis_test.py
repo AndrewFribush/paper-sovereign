@@ -21,6 +21,9 @@ STRATEGIES = {
     "guns only":     dict(census=.02, railway=.03, schools=.02, normal=.03, granary=.10, army=.80),
     "old regime":    dict(census=.02, railway=.02, schools=.02, normal=.02, granary=.22, army=.30),
     "balanced":      dict(census=.17, railway=.17, schools=.17, normal=.12, granary=.12, army=.25),
+    # Improvement of the land is the only instrument that touches what people eat, so
+    # without a style that funds it the welfare axis is never exercised and reads flat.
+    "improving":     dict(census=.06, railway=.05, schools=.05, normal=.06, granary=.10, army=.24, land=.44),
 }
 
 AXES = ["literacy", "welfare", "treasury", "provinces", "census error", "register"]

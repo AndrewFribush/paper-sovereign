@@ -29,6 +29,12 @@ START_YEAR = 1650
 # (1-carry)/carry.  These two constants are solved together, not tuned separately:
 # at carry .88 a ~15% surplus holds ~1.0y cover; one bad harvest takes it to ~0.73y
 # (price ~1.8x), two in a row to ~0.42y (price ~5x). That is a dearth, not a clamp.
+# Converts a graph freight cost into the price gap a trade must beat. Swept: at 2.6
+# the market over-integrates (median grain spread 1.5x, flat in 16% of years); at 6.0
+# it saturates. Below this, distance stops mattering and the player has no spread to
+# read; above it, nothing changes.
+FREIGHT_MULT = 6.0
+
 GRAIN_CARRY = 0.88
 GRAIN_SURPLUS = 1.15
 N_TURNS = 20
@@ -60,9 +66,15 @@ class Good:
 GOODS = {
     g.key: g for g in [
         Good("grain", "Grain", 10.0, 1.9, 1.0, 0.30, 14.0, 0.88),  # the moral-economy good
-        Good("coal",  "Coal",   6.0, 1.0, 0.6, 0.45, 3.5, 0.90),
-        Good("iron",  "Iron",  14.0, 1.1, 0.7, 0.45, 3.5, 0.94),
-        Good("cloth", "Cloth", 20.0, 0.7, 0.5, 0.55, 2.8, 0.92),
+        # Industrial clamps were far narrower than grain's (3.5x against 14x) while
+        # five provinces produce no coal, five no iron and four no cloth — a province
+        # that can only import drifts much further than one that can also grow its own.
+        # Measured at the old bounds: coal on its floor 26% of province-years, iron and
+        # cloth on their ceilings 15%. A clamp reached that often is an operating state,
+        # not a backstop, and it flattens exactly the spread the player reads.
+        Good("coal",  "Coal",   6.0, 1.0, 0.6, 0.22, 9.0, 0.90),
+        Good("iron",  "Iron",  14.0, 1.1, 0.7, 0.25, 9.0, 0.94),
+        Good("cloth", "Cloth", 20.0, 0.7, 0.5, 0.30, 7.0, 0.92),
     ]
 }
 GOOD_KEYS = list(GOODS)
@@ -141,6 +153,16 @@ def build_world(rng: random.Random) -> list[Province]:
         P("far",   "Cauldfell",  10, 5,  5.0, 0.05, 2.60, False, 0.03,   # the dark province
           {"grain": 6.0,  "cloth": 0.0,  "coal": 2.0,  "iron": 0.0}, clergy_strength=0.75, noble_strength=0.85),
     ]
+    # No province produced literally none of anything. There was a village smith, a
+    # weaver at the cottage, someone digging the outcrop. Without a floor, a province
+    # with zero capacity that arbitrage cannot reach — Marshend and Cauldfell have no
+    # merchant, so nobody trades to them — holds zero stock forever and its price reads
+    # the ceiling every single year. That is a constant, not information, and it was
+    # 15.7% of province-years for iron and cloth.
+    for p in provs:
+        for g in GOOD_KEYS:
+            p.capacity[g] = max(p.capacity[g], p.consumption(g) * 0.30)
+
     # every good's capacity is scaled to the surplus its own carry and target imply
     for g in GOOD_KEYS:
         need = sum(p.consumption(g) for p in provs)
@@ -868,8 +890,15 @@ class Game:
             # them — the transport graph works and the price model cannot feel it.
             # At this province count all-pairs is free; at scale this is the greedy
             # priority pass the design specifies instead of a global solver.
-            seen = [p for p in self.provs
-                    if p.bourgeoisie > 0.15 and p.key not in self.lost_provinces]
+            # Trade reaches wherever the graph reaches. A missing bourgeoisie makes a
+            # province invisible to INVESTMENT (main doc §8 — finding out requires a
+            # person with capital standing there) and to price REPORTING, both of which
+            # are gated elsewhere. It does not stop a carter. Gating arbitrage on it was
+            # a misreading, and it left provinces that produce none of a good and cannot
+            # be traded to holding zero stock forever, pinned to the ceiling in 15% of
+            # province-years — a constant, not a signal. Freight cost is what limits
+            # trade to the remote, and it does so on its own.
+            seen = [p for p in self.provs if p.key not in self.lost_provinces]
             # SEQUENTIAL settlement, not simultaneous. Executing every profitable
             # trade against prices computed before any of them moved makes a cheap
             # province a source in several pairs at once: it is drained repeatedly,
@@ -889,7 +918,7 @@ class Game:
                     for b in seen[i + 1:]:
                         pa, pb = price_of(a, g), price_of(b, g)
                         lo, hi = (a, b) if pa < pb else (b, a)
-                        if abs(pa - pb) > self.pair_cost(lo.key, hi.key) * 2.6:
+                        if abs(pa - pb) > self.pair_cost(lo.key, hi.key) * FREIGHT_MULT:
                             cands.append((abs(pa - pb), lo, hi))
                 if not cands:
                     break
@@ -897,7 +926,7 @@ class Game:
                 did = False
                 for _sp, lo, hi in cands:
                     spread = price_of(hi, g) - price_of(lo, g)
-                    cost = self.pair_cost(lo.key, hi.key) * 2.6
+                    cost = self.pair_cost(lo.key, hi.key) * FREIGHT_MULT
                     if spread <= cost:
                         continue          # an earlier trade already closed this one
                     # the move that equalises cover, damped so it cannot overshoot
