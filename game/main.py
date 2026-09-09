@@ -581,11 +581,12 @@ class UI:
 
     def draw_log(self):
         g = self.g
-        y0 = H - 168
+        y0 = H - 190
         self.rule(24, y0 - 10, W - 48)
         self.t("THE YEAR", 30, y0, self.f_sm, STALE)
         y = y0 + 20
-        for r in g.results:
+        shown = [r for r in g.results if r.friction] + [r for r in g.results if not r.friction]
+        for r in shown[:7]:
             ln = LINE_BY_KEY[r.line]
             if r.friction:
                 self.t(f"{ln.name}: £{r.appropriated:,.0f} appropriated, £{r.spent:,.0f} spent — "
@@ -593,7 +594,7 @@ class UI:
             else:
                 self.t(f"{ln.name}: £{r.spent:,.0f} spent.", 30, y, self.f_sm, GREEN)
             y += 18
-        room = 7 - len(g.results)
+        room = 8 - len(g.results)
         for line in g.log[:max(1, room)]:
             self.t(line, 30, y, self.f_sm, INK)
             y += 18
