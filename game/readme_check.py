@@ -66,7 +66,7 @@ def play(seed, mix):
 
 
 def main():
-    print("README  (are its claims still true?)")
+    print("DOCS  (are the claims in README.md and docs/ still true?)")
     text = open(README).read()
 
     def anchored(fragment):
@@ -152,12 +152,23 @@ def main():
           and "no press in the province" in (r.friction or ""),
           f"£{r.spent:.0f} spent — {r.friction}" if r else "no result")
 
+    # docs/engine-choice.md rests its whole recommendation on one measured number.
+    # Absolute times are machine-dependent and have risen 35% as the simulation grew,
+    # so asserting those would fail on someone else's laptop for no reason. The
+    # exponent is the finding, and the exponent does not care what machine it is on.
+    from game.bench import measure_exponent
+    exponent = measure_exponent()
+    engine = open(os.path.join(os.path.dirname(README), "docs", "engine-choice.md")).read()
+    check("the engine argument's exponent still holds",
+          "O(n^2.0" in engine, 1.9 <= exponent <= 2.25,
+          f"measured O(n^{exponent:.2f}); the port advice rests on this being ~2")
+
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + ", ".join(FAILS))
         print("The README says something the game no longer does. Re-measure, then edit both.")
         return 1
-    print("every number in the README is one the game still produces")
+    print("every number in the docs is one the game still produces")
     return 0
 
 

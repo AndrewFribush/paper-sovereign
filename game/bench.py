@@ -75,6 +75,18 @@ def time_tick(n: int, ticks: int = 3):
     return total, {k: v / ticks for k, v in parts.items()}
 
 
+def measure_exponent(sizes=(64, 160)) -> float:
+    """The growth exponent alone, on a small ladder.
+
+    Absolute timings are machine-dependent; the exponent is not, and the exponent is
+    what the engine recommendation actually rests on. Kept small so a docs check can
+    afford to run it.
+    """
+    import math
+    (n1, t1), (n2, t2) = [(n, time_tick(n)[0]) for n in sizes]
+    return math.log(t2 / t1) / math.log(n2 / n1)
+
+
 def main():
     print("SCALING  (per simulated tick, single-threaded CPython)\n")
     print(f"  {'provinces':>10} {'tick':>10} {'graph':>9} {'economy':>9} {'invest':>9}")
