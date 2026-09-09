@@ -341,6 +341,34 @@ def relief_is_worth_using():
 def known_findings():
     """Measured defects recorded rather than fixed. Empty is the goal. See BUILD-LOG."""
     print("\nKNOWN OPEN FINDINGS  (measured, recorded, pinned so they cannot worsen)")
+
+    # Unrest reaches its 1.0 clamp and sits there when the land line takes half the
+    # budget or more, and this project's own standing rule is that clamps are backstops
+    # and never operating states — the rule that caught legibility saturating in year 3.
+    # A pinned unrest stops distinguishing "angry" from "in revolt", which is exactly
+    # the distinction a player pouring money into enclosure needs to read. Recorded
+    # rather than fixed because unrest feeds the sedition trigger and the riot gate,
+    # both of which are calibrated against its current range.
+    keys = [l.key for l in LINES]
+    peak = 0.0
+    for seed in SEEDS[:6]:
+        g = Game(seed); g.collect()
+        while not g.game_over:
+            if g.crisis:
+                g.choose(g.crisis.choices[0].key); continue
+            t = g.treasury
+            rest = 0.2 / (len(keys) - 1)
+            for k in g.budget:
+                g.budget[k] = t * (0.8 if k == "land" else rest)
+            g.end_turn(); g.notice = []
+            if not g.game_over:
+                g.collect()
+            live = [p for p in g.provs if p.key not in g.lost_provinces] or g.provs
+            peak = max(peak, st.mean(p.unrest for p in live))
+    known_open("unrest must not sit on its clamp, even under heavy enclosure",
+               fixed=peak < 0.97, worse=False,
+               detail=f"mean unrest reaches {peak:.3f} at 80% of the budget on the land")
+
     if not OPEN:
         print("  none")
 
