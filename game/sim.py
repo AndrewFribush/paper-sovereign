@@ -695,8 +695,10 @@ class Game:
             # every playstyle — so legibility stopped binding anything, and it could not
             # gate the fiscal ladder at all (all three tax tiers were available by 1651).
             # Seeing your own country is meant to be the hard, slow thing.
-            return min(1.0, 0.05 + self.register_quality * 0.85
-                       + self.supplied("legibility") * 0.5)
+            # divided by administrative load: a register that covers eight counties
+            # does not cover fourteen, and on the larger map this hit its cap by 1664.
+            raw = 0.05 + self.register_quality * 0.85 + self.supplied("legibility") * 0.5
+            return max(0.05, min(1.0, raw / max(1.0, self.admin_load ** 0.7)))
         if link == "compliance":
             if line_key == "land":
                 # the moral economy: commons, gleaning and wood-gathering were a real
@@ -789,6 +791,17 @@ class Game:
         for p in self.provs:
             p.unrest = min(1.0, p.unrest + 0.22)
 
+    def unit_cost(self, line_key: str) -> float:
+        """What a unit of an instrument costs in THIS country.
+
+        Line costs were absolute while revenue scales with the map, so growing from 8
+        provinces to 14 tripled income against a fixed price list and money stopped
+        being scarce — the treasury piled up and every line ran to its non-money link.
+        A census of fourteen counties costs more than a census of eight.
+        """
+        held = sum(1 for p in self.provs if p.key not in self.lost_provinces)
+        return LINE_BY_KEY[line_key].unit_cost * (held / 8.0) ** 0.85
+
     def preview(self, line_key: str) -> tuple[str, float]:
         """Binding link and its value — shown BEFORE committing. Transparent about mechanism."""
         line = LINE_BY_KEY[line_key]
@@ -828,9 +841,9 @@ class Game:
             if appro <= 0:
                 continue
             binding, bv = self.preview(line.key)
-            wanted = appro / line.unit_cost
+            wanted = appro / self.unit_cost(line.key)
             through = wanted * bv
-            spent = through * line.unit_cost
+            spent = through * self.unit_cost(line.key)
             self.treasury = max(0.0, self.treasury - spent)
             waste = appro - spent
             fr = ""
