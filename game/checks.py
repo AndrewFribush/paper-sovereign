@@ -211,13 +211,36 @@ def mechanism():
     ca, cb = st.mean(pairs_cost(g) for g in a), st.mean(pairs_cost(g) for g in b)
     check("and the line lowers freight between what it connects", ca < cb * 0.9,
           f"{ca:.2f} vs {cb:.2f}")
-    # NOT yet verified: that the lower freight shows up as price convergence.
-    # Measured at 1.80x vs 1.85x on connected pairs under a controlled comparison —
-    # no effect. See the open finding in docs/BUILD-LOG.md. This check is deliberately
-    # absent rather than weakened; do not add a passing version of it until the
-    # arbitrage actually clears to the freight bound.
-    print(f"  ----  price convergence from rail: NOT YET WORKING "
-          f"({da:.1f}x vs {db:.1f}x) — see BUILD-LOG open finding")
+    # And that the lower freight reaches the price level. Measured on the pairs the
+    # line connects, as the excess over parity — which is the form the design states
+    # the claim in (the Anglo-American wheat gap fell from ~60% to ~15%).
+    def gap(g, S):
+        out = []
+        for s in S[12:]:
+            for x, y in (("cap", "ironby"), ("cap", "blackm"), ("cap", "hollin")):
+                if x in g.lost_provinces or y in g.lost_provinces:
+                    continue
+                px, py = price_of(g.by_key[x], "grain"), price_of(g.by_key[y], "grain")
+                out.append(max(px, py) / max(0.01, min(px, py)))
+        return st.mean(out) if out else 1.0
+    ga = st.mean(gap(g, S) - 1.0 for g, S in zip(a, Sa))
+    gb = st.mean(gap(g, S) - 1.0 for g, S in zip(b, Sb))
+    check("and the lower freight reaches the price level", ga < gb * 0.85,
+          f"excess over parity {ga*100:.1f}% vs {gb*100:.1f}%")
+
+    # The market must actually clear, or a price movement is noise rather than a
+    # pointer to a cause — and the whole diagnosis layer is reading tea leaves.
+    unsettled = 0
+    for g in a + b:
+        live = [p for p in g.provs if p.key not in g.lost_provinces
+                and p.bourgeoisie > 0.15]
+        for i, x in enumerate(live):
+            for y in live[i + 1:]:
+                px, py = price_of(x, "grain"), price_of(y, "grain")
+                if abs(px - py) > g.pair_cost(x.key, y.key) * 2.6 * 1.15:
+                    unsettled += 1
+    check("the market settles to the freight bound", unsettled == 0,
+          f"{unsettled} pairs left profitable after settlement")
 
     # the census must actually sharpen belief, or the whole pillar is decorative
     seeing = dict(census=.45, army=.25, railway=.05, granary=.10, normal=.10, schools=.05, land=.00)

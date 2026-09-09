@@ -870,25 +870,47 @@ class Game:
             # priority pass the design specifies instead of a global solver.
             seen = [p for p in self.provs
                     if p.bourgeoisie > 0.15 and p.key not in self.lost_provinces]
-            for _ in range(4):
-                trades = []
+            # SEQUENTIAL settlement, not simultaneous. Executing every profitable
+            # trade against prices computed before any of them moved makes a cheap
+            # province a source in several pairs at once: it is drained repeatedly,
+            # overshoots into being the dearest, and becomes the destination for
+            # everything on the next pass. Measured, before this fix, one province
+            # swung 13.3 -> 70.7 -> 12.0 -> 79.6 -> 88.0 across six iterations.
+            #
+            # That is the "oscillating prices" failure named in the very first answer
+            # of the source conversation, and while it was happening no transport
+            # improvement could show up in prices, because the prices were noise.
+            #
+            # So: re-check each trade against LIVE prices immediately before it
+            # executes, and never move more than closes the gap.
+            for _ in range(6):
+                cands = []
                 for i, a in enumerate(seen):
                     for b in seen[i + 1:]:
                         pa, pb = price_of(a, g), price_of(b, g)
                         lo, hi = (a, b) if pa < pb else (b, a)
-                        spread = abs(pa - pb)
-                        cost = self.pair_cost(lo.key, hi.key) * 2.6
-                        if spread > cost:
-                            trades.append((spread - cost, lo, hi))
-                if not trades:
+                        if abs(pa - pb) > self.pair_cost(lo.key, hi.key) * 2.6:
+                            cands.append((abs(pa - pb), lo, hi))
+                if not cands:
                     break
-                trades.sort(key=lambda t: -t[0])
-                for _profit, lo, hi in trades:
-                    move = min(lo.stocks[g] * 0.22, hi.consumption(g) * 0.55)
-                    if move <= 0:
+                cands.sort(key=lambda t: -t[0])
+                did = False
+                for _sp, lo, hi in cands:
+                    spread = price_of(hi, g) - price_of(lo, g)
+                    cost = self.pair_cost(lo.key, hi.key) * 2.6
+                    if spread <= cost:
+                        continue          # an earlier trade already closed this one
+                    # the move that equalises cover, damped so it cannot overshoot
+                    cl, ch = lo.consumption(g), hi.consumption(g)
+                    equalise = (lo.stocks[g] * ch - hi.stocks[g] * cl) / max(1e-6, cl + ch)
+                    move = max(0.0, min(equalise * 0.6, lo.stocks[g] * 0.30))
+                    if move <= 1e-6:
                         continue
                     lo.stocks[g] -= move
                     hi.stocks[g] += move * 0.96
+                    did = True
+                if not did:
+                    break
 
         # unrest follows unmet need, weighted to grain
         for p in self.provs:
