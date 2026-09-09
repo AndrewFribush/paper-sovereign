@@ -1,0 +1,484 @@
+"""
+Vicky — thesis slice. pygame front end.
+
+One country, one screen, twenty turns.
+    F1  toggle the ground-truth inspector (real values beside believed ones)
+    UP/DOWN or click   select a budget line
+    LEFT/RIGHT         move money
+    ENTER              end the year
+    ESC                quit
+
+Rendering rule from main doc §19: a believed number must NEVER be typographically
+identical to a known number. Believed values are dimmer, italicised by colour, and
+always carry a source and a date.
+"""
+from __future__ import annotations
+import sys, os
+import pygame
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from game.sim import (Game, LINES, LINE_BY_KEY, GOODS, GOOD_KEYS,
+                      price_of, welfare, LINK_NAMES, N_TURNS)
+
+W, H = 1280, 800
+INK        = (34, 30, 26)
+PARCH      = (233, 225, 208)
+PARCH_DK   = (214, 203, 181)
+KNOWN      = (28, 26, 22)      # a number you actually know
+BELIEVED   = (126, 110, 84)    # a number you were told.  never the same colour.
+STALE      = (158, 142, 116)
+TRUTH      = (150, 40, 40)     # inspector only
+GOLD       = (150, 112, 40)
+RED        = (150, 46, 40)
+GREEN      = (58, 100, 52)
+RULE       = (188, 175, 152)
+
+
+class UI:
+    def __init__(self):
+        pygame.init()
+        pygame.display.set_caption("Vicky — a government that cannot see its own country")
+        self.screen = pygame.display.set_mode((W, H))
+        self.clock = pygame.time.Clock()
+        self.f_h1 = pygame.font.SysFont("Georgia,Times New Roman,serif", 30)
+        self.f_h2 = pygame.font.SysFont("Georgia,Times New Roman,serif", 20)
+        self.f    = pygame.font.SysFont("Georgia,Times New Roman,serif", 16)
+        self.f_sm = pygame.font.SysFont("Georgia,Times New Roman,serif", 13)
+        self.f_mono = pygame.font.SysFont("Menlo,Consolas,monospace", 14)
+        self.g = Game(7)
+        self.g.collect()
+        self.sel = 0
+        self.inspector = False
+        self.hover_prov = None
+        self.detail = None
+        self.politics = False
+        self.btn: dict = {}
+        self.prov_rects: dict = {}
+
+    # -- helpers ----------------------------------------------------------
+    def t(self, s, x, y, font=None, col=INK):
+        font = font or self.f
+        self.screen.blit(font.render(str(s), True, col), (x, y))
+
+    def tr(self, s, x, y, font=None, col=INK):
+        font = font or self.f
+        surf = font.render(str(s), True, col)
+        self.screen.blit(surf, (x - surf.get_width(), y))
+
+    def rule(self, x, y, w):
+        pygame.draw.line(self.screen, RULE, (x, y), (x + w, y), 1)
+
+    # -- panels -----------------------------------------------------------
+    def draw_header(self):
+        g = self.g
+        self.t(f"{g.year}", 28, 20, self.f_h1)
+        self.t(f"Year {g.turn + 1} of {N_TURNS}", 120, 30, self.f_sm, STALE)
+
+        self.t("TREASURY", 260, 22, self.f_sm, STALE)
+        self.t(f"£{g.treasury:,.0f}", 260, 38, self.f_h2, KNOWN)
+        self.t("REVENUE", 400, 22, self.f_sm, STALE)
+        self.t(f"£{g.revenue():,.0f}", 400, 38, self.f_h2, KNOWN)
+        self.t("ARMY", 530, 22, self.f_sm, STALE)
+        self.t(f"{g.army:.1f}", 530, 38, self.f_h2, KNOWN)
+        self.t("RESERVE", 620, 22, self.f_sm, STALE)
+        self.t(f"{g.reserve_grain:,.0f} qr", 620, 38, self.f_h2, KNOWN)
+
+        # the headline number the state believes about itself
+        self.t("SUBJECTS", 760, 22, self.f_sm, STALE)
+        bp = g.believed_pop()
+        self.t(f"{bp*1000:,.0f}", 760, 38, self.f_h2, BELIEVED)
+        if self.inspector:
+            self.t(f"actually {g.true_pop()*1000:,.0f}", 760, 62, self.f_sm, TRUTH)
+
+        self.t("WAR EXPECTED", 950, 22, self.f_sm, STALE)
+        yrs = max(0, g.war_in)
+        col = RED if yrs <= 2 else INK
+        self.t(f"in {yrs} year{'s' if yrs != 1 else ''}", 950, 38, self.f_h2, col)
+        need = 1.0 + g.threat * 3.2 + (g.year - 1650) * 0.10
+        self.t(f"they will bring ~{need:.1f}", 950, 62, self.f_sm, STALE)
+
+        self.rule(24, 84, W - 48)
+
+    def draw_map(self):
+        g = self.g
+        x0, y0 = 30, 104
+        self.t("THE COUNTRY", x0, y0, self.f_sm, STALE)
+        self.t("as reported", x0 + 120, y0, self.f_sm, BELIEVED)
+        self.prov_rects = {}
+        cw, ch = 140, 78
+        for p in g.provs:
+            gx = x0 + (p.x - 2) * 60
+            gy = y0 + 26 + (p.y - 1) * 92
+            r = pygame.Rect(gx, gy, cw, ch)
+            self.prov_rects[p.key] = r
+            lost = p.key in g.lost_provinces
+            bg = (206, 196, 176) if lost else PARCH_DK
+            pygame.draw.rect(self.screen, bg, r, border_radius=3)
+            if p.railed:
+                pygame.draw.line(self.screen, GOLD, (r.left + 6, r.bottom - 5),
+                                 (r.right - 6, r.bottom - 5), 3)
+            pygame.draw.rect(self.screen, RULE, r, 1, border_radius=3)
+            if lost:
+                self.t(p.name, r.x + 8, r.y + 6, self.f_sm, STALE)
+                self.t("ceded", r.x + 8, r.y + 24, self.f_sm, RED)
+                continue
+            self.t(p.name, r.x + 8, r.y + 5, self.f, KNOWN)
+
+            ob = g.beliefs.get_pop(p.key)
+            if ob:
+                age = ob.age(g.year)
+                col = BELIEVED if age < 12 else STALE
+                self.t(f"{ob.value*1000:,.0f}", r.x + 8, r.y + 24, self.f_sm, col)
+                self.t(f"{ob.source} {ob.year}", r.x + 8, r.y + 38, self.f_sm, STALE)
+            else:
+                self.t("numerous", r.x + 8, r.y + 24, self.f_sm, STALE)
+
+            pb = g.beliefs.get_price(p.key, "grain")
+            if pb:
+                col = RED if pb.value > GOODS["grain"].ref_price * 1.6 else BELIEVED
+                self.t(f"grain {pb.value:,.1f}", r.x + 8, r.y + 53, self.f_sm, col)
+            else:
+                self.t("no return", r.x + 8, r.y + 53, self.f_sm, STALE)
+
+            ub = g.beliefs.unrest.get(p.key)
+            if ub and ub.value > 0.35:
+                pygame.draw.circle(self.screen, RED, (r.right - 12, r.y + 12), 4)
+
+            if self.inspector:
+                self.tr(f"{p.pop*1000:,.0f}", r.right - 7, r.y + 24, self.f_sm, TRUTH)
+                self.tr(f"{price_of(p,'grain'):,.1f}", r.right - 7, r.y + 38, self.f_sm, TRUTH)
+                self.tr(f"w{welfare(p):.2f}", r.right - 7, r.y + 53, self.f_sm, TRUTH)
+
+    def spark(self, series, x, y, w, h, col):
+        """A price series as the state has it on file. Gaps are gaps."""
+        if len(series) < 2:
+            self.t("no series", x, y + 2, self.f_sm, STALE); return
+        vals = [v for _, v in series][-14:]
+        lo, hi = min(vals), max(vals)
+        rng = max(1e-6, hi - lo)
+        pts = [(x + i * w / max(1, len(vals) - 1), y + h - (v - lo) / rng * h)
+               for i, v in enumerate(vals)]
+        pygame.draw.lines(self.screen, col, False, pts, 2)
+        self.tr(f"{vals[-1]:,.1f}", x + w + 42, y + h / 2 - 8, self.f_sm, col)
+
+    def draw_detail(self):
+        g = self.g
+        key = self.detail
+        p = g.by_key[key]
+        panel = pygame.Rect(24, 96, 654, 528)
+        pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
+        pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
+        x, y = panel.x + 18, panel.y + 14
+        self.t(p.name, x, y, self.f_h1, KNOWN)
+        self.tr("click again to close", panel.right - 16, y + 12, self.f_sm, STALE)
+        y += 44
+
+        ob = g.beliefs.get_pop(key)
+        if ob:
+            self.t("Subjects", x, y, self.f_sm, STALE)
+            self.t(f"{ob.value*1000:,.0f}", x + 90, y - 3, self.f_h2, BELIEVED)
+            self.t(f"{ob.source}, {ob.year} — {ob.age(g.year)} years old",
+                   x + 210, y, self.f_sm, STALE)
+            if self.inspector:
+                self.tr(f"actually {p.pop*1000:,.0f}", panel.right - 16, y, self.f_sm, TRUTH)
+        else:
+            self.t("Subjects", x, y, self.f_sm, STALE)
+            self.t("numerous", x + 90, y - 3, self.f_h2, STALE)
+        y += 30
+        self.t("Freight to the capital", x, y, self.f_sm, STALE)
+        self.t(f"{p.freight():.2f}" + ("  — railed" if p.railed else ""), x + 210, y, self.f_sm, KNOWN)
+        y += 26
+        self.rule(x, y, panel.width - 36); y += 12
+
+        self.t("PRICES ON FILE", x, y, self.f_sm, STALE)
+        self.t("what the market reported, and when", x + 150, y, self.f_sm, BELIEVED)
+        y += 22
+        for gk in GOOD_KEYS:
+            gd = GOODS[gk]
+            pb = g.beliefs.get_price(key, gk)
+            self.t(gd.name, x, y + 6, self.f, KNOWN)
+            if pb:
+                dear = pb.value > gd.ref_price * 1.45
+                col = RED if dear else BELIEVED
+                self.t(f"{pb.value:,.1f}", x + 84, y + 3, self.f_h2, col)
+                self.t(f"({pb.year})", x + 150, y + 8, self.f_sm, STALE)
+                self.t(f"usual {gd.ref_price:,.0f}", x + 200, y + 8, self.f_sm, STALE)
+            else:
+                self.t("no return", x + 84, y + 6, self.f, STALE)
+            self.spark(g.beliefs.series(key, gk), x + 300, y, 240, 26,
+                       RED if (pb and pb.value > gd.ref_price * 1.45) else BELIEVED)
+            if self.inspector:
+                self.tr(f"{price_of(p, gk):,.1f}", panel.right - 16, y + 6, self.f_sm, TRUTH)
+            y += 34
+
+        wh = g.beliefs.wage_hist.get(key, [])
+        self.t("Wages", x, y + 6, self.f, KNOWN)
+        if wh:
+            self.t(f"{wh[-1][1]:,.1f}", x + 84, y + 3, self.f_h2, BELIEVED)
+        self.spark(wh, x + 300, y, 240, 26, GOLD)
+        y += 40
+        self.rule(x, y, panel.width - 36); y += 12
+
+        self.t("THE CLERK'S NOTE", x, y, self.f_sm, STALE)
+        y += 20
+        for line in g.diagnose(key):
+            col = INK if not line.startswith("  ") else STALE
+            self.t(line, x, y, self.f_sm, col)
+            y += 17
+
+        self.btn = {}
+        rr = pygame.Rect(x, panel.bottom - 46, 200, 30)
+        can = g.reserve_grain > 0.5
+        pygame.draw.rect(self.screen, PARCH if not can else PARCH_DK, rr, border_radius=3)
+        pygame.draw.rect(self.screen, RULE if not can else GOLD, rr, 1, border_radius=3)
+        self.t(f"Open the reserve here", rr.x + 14, rr.y + 6, self.f, KNOWN if can else STALE)
+        self.btn[("relief", key)] = rr
+        self.t(f"{g.reserve_grain:,.0f} qr in the magazine  ·  "
+               f"{(1.0 - p.freight() * 0.22) * 100:.0f}% of it would arrive here",
+               rr.right + 16, rr.y + 8, self.f_sm, STALE)
+
+    def draw_politics(self):
+        g = self.g
+        panel = pygame.Rect(24, 96, 654, 528)
+        pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
+        pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
+        x, y = panel.x + 18, panel.y + 14
+        self.t("THE SETTLEMENT", x, y, self.f_h1, KNOWN)
+        self.tr("P to close", panel.right - 16, y + 12, self.f_sm, STALE)
+        y += 42
+        self.t("Discretion is not a pool. It is the set of things you can do without asking.",
+               x, y, self.f_sm, STALE)
+        y += 26
+        self.btn = {}
+        for h in g.settlement:
+            box = pygame.Rect(x, y, panel.width - 36, 138)
+            pygame.draw.rect(self.screen, PARCH, box, border_radius=3)
+            pygame.draw.rect(self.screen, RULE, box, 1, border_radius=3)
+            self.t(h.name, x + 14, y + 10, self.f_h2, KNOWN)
+            if h.overridden:
+                self.t("OVERRIDDEN — they no longer obstruct, and no longer help",
+                       x + 200, y + 16, self.f_sm, RED)
+            else:
+                pygame.draw.rect(self.screen, PARCH_DK, (x + 200, y + 20, 180, 8), border_radius=2)
+                c = RED if h.consent < 0.45 else GOLD
+                pygame.draw.rect(self.screen, c, (x + 200, y + 20, int(180 * h.consent), 8),
+                                 border_radius=2)
+                self.t(f"{h.consent*100:.0f}% consent", x + 392, y + 14, self.f_sm, c)
+
+            blocks = ", ".join(LINE_BY_KEY[k].name for k in h.domain)
+            self.t(f"Blocks:   {blocks}", x + 14, y + 40, self.f_sm, INK)
+            sup = ", ".join(LINK_NAMES[k].lower() for k, v in h.supplies.items() if v > 0)
+            self.t(f"Supplies: {sup or 'nothing'}", x + 14, y + 58, self.f_sm,
+                   STALE if h.overridden else GREEN)
+            self.t(f"Wants:    {h.price}", x + 14, y + 76, self.f_sm, STALE)
+
+            if not h.overridden:
+                pr = pygame.Rect(x + 14, y + 100, 150, 26)
+                ok = g.can_pay(h.key)
+                pygame.draw.rect(self.screen, PARCH_DK if ok else PARCH, pr, border_radius=3)
+                pygame.draw.rect(self.screen, RULE, pr, 1, border_radius=3)
+                self.t(f"Pay £{h.price_cost:,.0f}", pr.x + 12, pr.y + 4, self.f_sm,
+                       KNOWN if ok else STALE)
+                orr = pygame.Rect(x + 178, y + 100, 150, 26)
+                pygame.draw.rect(self.screen, PARCH_DK, orr, border_radius=3)
+                pygame.draw.rect(self.screen, RED, orr, 1, border_radius=3)
+                self.t("Override", orr.x + 12, orr.y + 4, self.f_sm, RED)
+                self.btn[("pay", h.key)] = pr
+                self.btn[("ovr", h.key)] = orr
+                self.t("cheap now, narrows you forever", x + 344, y + 105, self.f_sm, STALE)
+            y += 148
+
+    def draw_budget(self):
+        g = self.g
+        x0, y0 = 700, 104
+        self.t("APPROPRIATIONS", x0, y0, self.f_sm, STALE)
+        allocated = sum(g.budget.values())
+        self.tr(f"£{allocated:,.0f} of £{g.treasury:,.0f}", W - 30, y0, self.f_sm,
+                RED if allocated > g.treasury else KNOWN)
+        y = y0 + 24
+        for i, line in enumerate(LINES):
+            sel = (i == self.sel)
+            r = pygame.Rect(x0 - 6, y - 4, W - x0 - 24, 62)
+            if sel:
+                pygame.draw.rect(self.screen, PARCH_DK, r, border_radius=3)
+            self.t(line.name, x0, y, self.f_h2 if sel else self.f, KNOWN)
+            self.tr(f"£{g.budget[line.key]:,.0f}", W - 30, y, self.f_h2 if sel else self.f, GOLD)
+            self.t(line.blurb, x0, y + 22, self.f_sm, STALE)
+
+            binding, bv = g.preview(line.key)
+            bar_x, bar_y = x0, y + 42
+            pygame.draw.rect(self.screen, PARCH_DK, (bar_x, bar_y, 260, 8), border_radius=2)
+            col = RED if bv < 0.4 else (GOLD if bv < 0.75 else GREEN)
+            pygame.draw.rect(self.screen, col, (bar_x, bar_y, int(260 * bv), 8), border_radius=2)
+            self.t(f"limited by {LINK_NAMES[binding].lower()}  {bv*100:.0f}%",
+                   bar_x + 270, y + 38, self.f_sm, col)
+            y += 66
+
+        self.rule(x0, y + 2, W - x0 - 24)
+        self.t("Money above the binding link is not spent.", x0, y + 10, self.f_sm, STALE)
+
+        self.t("INSTITUTIONS", x0, y + 40, self.f_sm, STALE)
+        inst = [("Clerks", g.clerks), ("Masters", g.masters), ("Engineers", g.engineers),
+                ("Register", g.register_quality)]
+        for j, (nm, v) in enumerate(inst):
+            xx = x0 + (j % 2) * 260
+            yy = y + 60 + (j // 2) * 22
+            self.t(nm, xx, yy, self.f_sm, KNOWN)
+            pygame.draw.rect(self.screen, PARCH_DK, (xx + 80, yy + 5, 120, 7), border_radius=2)
+            pygame.draw.rect(self.screen, GOLD, (xx + 80, yy + 5, int(120 * min(1, v)), 7),
+                             border_radius=2)
+
+        cons = [(h.name.replace("The ", ""), 1.0 if h.overridden else h.consent)
+                for h in g.settlement]
+        self.t("CONSENT   (P for the settlement)", x0, y + 112, self.f_sm, STALE)
+        for j, (nm, v) in enumerate(cons):
+            xx = x0 + j * 175
+            self.t(nm, xx, y + 130, self.f_sm, KNOWN)
+            pygame.draw.rect(self.screen, PARCH_DK, (xx, y + 148, 150, 7), border_radius=2)
+            c = RED if v < 0.4 else GOLD
+            pygame.draw.rect(self.screen, c, (xx, y + 148, int(150 * min(1, v)), 7), border_radius=2)
+
+    def draw_log(self):
+        g = self.g
+        y0 = H - 168
+        self.rule(24, y0 - 10, W - 48)
+        self.t("THE YEAR", 30, y0, self.f_sm, STALE)
+        y = y0 + 20
+        for r in g.results:
+            ln = LINE_BY_KEY[r.line]
+            if r.friction:
+                self.t(f"{ln.name}: £{r.appropriated:,.0f} appropriated, £{r.spent:,.0f} spent — "
+                       f"{r.friction}.", 30, y, self.f_sm, RED)
+            else:
+                self.t(f"{ln.name}: £{r.spent:,.0f} spent.", 30, y, self.f_sm, GREEN)
+            y += 18
+        room = 7 - len(g.results)
+        for line in g.log[:max(1, room)]:
+            self.t(line, 30, y, self.f_sm, INK)
+            y += 18
+
+        self.tr("F1 truth   P politics   S/L save·load   click a province   ↑↓ select   ←→ fund   ENTER end year", W - 30, H - 26,
+                self.f_sm, STALE)
+        if self.inspector:
+            self.t("GROUND TRUTH  ·  red = simulation, not the state's belief", 30, H - 26, self.f_sm, TRUTH)
+
+    def draw_end(self):
+        g = self.g
+        s = pygame.Surface((W, H)); s.set_alpha(238); s.fill(PARCH)
+        self.screen.blit(s, (0, 0))
+        self.t(f"{g.year}", 80, 90, self.f_h1)
+        self.t(g.ending, 80, 140, self.f_h2)
+        self.t("There is no score. You said what you were trying to do; here is what happened.",
+               80, 176, self.f_sm, STALE)
+        rows = [
+            ("Subjects you believed you had", f"{g.believed_pop()*1000:,.0f}", BELIEVED),
+            ("Subjects you actually had",     f"{g.true_pop()*1000:,.0f}", TRUTH),
+            ("Literacy",                      f"{g.mean_literacy()*100:.1f}%", KNOWN),
+            ("Welfare of your people",        f"{g.mean_welfare()*100:.0f}%", KNOWN),
+            ("Treasury",                      f"£{g.treasury:,.0f}", KNOWN),
+            ("Provinces ceded",               f"{len(g.lost_provinces)}", RED if g.lost_provinces else KNOWN),
+            ("Sovereign credit",              f"{g.credit:.2f}", KNOWN),
+            ("Register quality",              f"{g.register_quality*100:.0f}%", KNOWN),
+        ]
+        y = 230
+        for label, val, col in rows:
+            self.t(label, 80, y, self.f, INK)
+            self.t(val, 560, y, self.f_h2, col)
+            y += 36
+        err = abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())
+        self.t(f"Your census was wrong by {err*100:.1f}% at the end.", 80, y + 20, self.f_h2, TRUTH)
+        self.t("ESC to quit", 80, y + 64, self.f_sm, STALE)
+
+    # -- input ------------------------------------------------------------
+    def step(self, delta):
+        g = self.g
+        key = LINES[self.sel].key
+        g.budget[key] = max(0.0, g.budget[key] + delta)
+
+    def run(self):
+        while True:
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
+                    return
+                if e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_ESCAPE:
+                        if self.detail or self.politics:
+                            self.detail = None
+                            self.politics = False
+                            continue
+                        return
+                    if e.key == pygame.K_F1:
+                        self.inspector = not self.inspector
+                    if e.key == pygame.K_s:
+                        self.g.log.insert(0, self.g.save())
+                    if e.key == pygame.K_l:
+                        loaded = self.g.__class__.load()
+                        if loaded:
+                            self.g = loaded
+                            self.detail = None; self.politics = False
+                            self.g.log.insert(0, "Loaded.")
+                    if e.key == pygame.K_p:
+                        self.politics = not self.politics
+                        self.detail = None
+                    if self.g.game_over:
+                        continue
+                    if e.key in (pygame.K_DOWN, pygame.K_j):
+                        self.sel = (self.sel + 1) % len(LINES)
+                    if e.key in (pygame.K_UP, pygame.K_k):
+                        self.sel = (self.sel - 1) % len(LINES)
+                    mult = 100 if (e.mod & pygame.KMOD_SHIFT) else 25
+                    if e.key == pygame.K_RIGHT:
+                        self.step(mult)
+                    if e.key == pygame.K_LEFT:
+                        self.step(-mult)
+                    if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        self.g.end_turn()
+                        if not self.g.game_over:
+                            self.g.collect()
+                if e.type == pygame.MOUSEBUTTONDOWN and not self.g.game_over:
+                    mx, my = e.pos
+                    if mx >= 694:                       # the appropriations column
+                        for i, line in enumerate(LINES):
+                            top = 128 + i * 66
+                            if top <= my <= top + 62:
+                                self.sel = i
+                                if e.button == 1: self.step(25)
+                                if e.button == 3: self.step(-25)
+                                break
+                    elif self.politics:
+                        for (kind, hk), r in self.btn.items():
+                            if r.collidepoint(mx, my):
+                                if kind == "pay": self.g.pay(hk)
+                                else: self.g.override(hk)
+                                break
+                    elif self.detail:
+                        hit = None
+                        for (kind, hk), r in self.btn.items():
+                            if kind == "relief" and r.collidepoint(mx, my):
+                                hit = hk
+                        if hit:
+                            self.g.log.insert(0, self.g.relieve(hit))
+                        else:
+                            self.detail = None
+                    else:
+                        for k, r in self.prov_rects.items():
+                            if r.collidepoint(mx, my) and k not in self.g.lost_provinces:
+                                self.detail = k
+                                break
+
+            self.screen.fill(PARCH)
+            if self.g.game_over:
+                self.draw_end()
+            else:
+                self.draw_header()
+                if self.politics: self.draw_politics()
+                elif self.detail: self.draw_detail()
+                else: self.draw_map()
+                self.draw_budget(); self.draw_log()
+            pygame.display.flip()
+            self.clock.tick(60)
+
+
+if __name__ == "__main__":
+    UI().run()
+    pygame.quit()
