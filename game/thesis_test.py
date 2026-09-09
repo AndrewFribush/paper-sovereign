@@ -57,7 +57,10 @@ def play(mix: dict, seed: int) -> dict:
         "literacy":     g.mean_literacy() * 100,
         "welfare":      g.mean_welfare() * 100,
         "treasury":     g.treasury,
-        "provinces":    8 - len(g.lost_provinces),
+        # not `8 - lost`: the map has been fourteen provinces since it was expanded,
+        # and this column had been quietly reporting "5.9 of 8" for a country of
+        # fourteen. Same hardcoded count as the end screen carried.
+        "provinces":    len(g.provs) - len(g.lost_provinces),
         "census error": err * 100,
         "register":     g.register_quality * 100,
     }

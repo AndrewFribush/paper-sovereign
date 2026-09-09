@@ -144,7 +144,10 @@ def main():
                     g.budget[k] = g.treasury * v
                 g.end_turn(); g.notice = []
                 if not g.game_over: g.collect()
-            out.append((g.mean_welfare(), g.mean_literacy(), 8 - len(g.lost_provinces),
+            # third instance of a count hardcoded to the map's original size; the
+            # map has been fourteen provinces for hours
+            out.append((g.mean_welfare(), g.mean_literacy(),
+                        len(g.provs) - len(g.lost_provinces),
                         -abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop()),
                         g.treasury / 500.0))
         res[name] = [st.mean(x[i] for x in out) for i in range(5)]

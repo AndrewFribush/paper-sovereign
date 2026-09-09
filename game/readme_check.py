@@ -211,6 +211,21 @@ def main():
           f"checks makes {counted['checks']}, inputs makes {counted['inputs']}"
           + ("" if stated_ok else " — the summary table says otherwise"))
 
+    # A count hardcoded to the map's original size hid in three separate harnesses for
+    # hours, each quietly reporting a fourteen-province country as "of 8". They only
+    # surfaced when someone read the column. Grep for the shape instead.
+    import pathlib, re
+    offenders = []
+    for f in sorted(pathlib.Path(os.path.dirname(README), "game").glob("*.py")):
+        for i, line in enumerate(f.read_text().split("\n"), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if re.search(r"\b8\s*-\s*len\(\w*\.?lost_provinces", line):
+                offenders.append(f"{f.name}:{i}")
+    check("no harness measures the map against a size it stopped being",
+          True, not offenders,
+          "; ".join(offenders) if offenders else "none hardcoded")
+
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + ", ".join(FAILS))
