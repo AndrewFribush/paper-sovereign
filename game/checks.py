@@ -316,6 +316,19 @@ def known_findings():
                fixed=gain <= 1.0, worse=gain > 14.0,
                detail=f"killing 25% of the population moves mean welfare {gain:+.2f} points")
 
+    # Same root cause, second symptom: revenue() is computed from capacity too, so
+    # losing half your subjects costs nothing at the exchequer. Pinned separately
+    # because it will be fixed by the same one-line change and should flip with it.
+    r0 = g.revenue()
+    h2 = copy.deepcopy(g)
+    for p in h2.provs:
+        p.pop *= 0.5
+    h2.collect()
+    drop = (r0 - h2.revenue()) / max(1e-6, r0) * 100
+    known_open("losing half the population must cost something at the exchequer",
+               fixed=drop >= 10.0, worse=drop < -1.0,
+               detail=f"halving the population moves revenue {-drop:+.2f}%")
+
 
 def conservation():
     """Goods are created only by production and destroyed only by consumption,

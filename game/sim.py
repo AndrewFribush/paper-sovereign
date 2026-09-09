@@ -1793,16 +1793,6 @@ class Game:
             r += t.yield_per * scale * (1.0 - math.exp(-2.1 * rate))
         return r * (0.7 + 0.3 * self.credit)
 
-    def _old_revenue(self) -> float:
-        """Excise on trade — the cheap fiscal tier. You tax what moves, not what you cannot see."""
-        r = 0.0
-        for p in self.provs:
-            if p.key in self.lost_provinces:
-                continue
-            traded = sum(p.capacity[g] for g in GOOD_KEYS) * (0.25 + p.bourgeoisie * 0.7)
-            r += traded * 1.15 / max(0.5, p.freight() ** 0.4)
-        return r * (0.7 + 0.3 * self.credit)
-
     def collect(self):
         self.treasury += self.revenue()
 
