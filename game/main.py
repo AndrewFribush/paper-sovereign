@@ -170,7 +170,9 @@ class UI:
         g = self.g
         key = self.detail
         p = g.by_key[key]
-        panel = pygame.Rect(24, 96, 654, 528)
+        # 500, not 528: at 528 the panel bottom sat at 624 and covered the log's
+        # rule and its THE YEAR header at 600.
+        panel = pygame.Rect(24, 96, 654, 500)
         pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
         pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
         x, y = panel.x + 18, panel.y + 14
@@ -308,27 +310,36 @@ class UI:
             ("Press F1 at any moment to see what is actually happening underneath.", 1),
             ("It is not cheating. It is there so you can tell a lie from a bug.", 2),
             ("", 0),
+            ("There is no score, and nothing here is trying to be won.", 1),
+            ("In twenty years the game will tell you what you built, and what you", 2),
+            ("never found out. Those are two different lists.", 2),
+            ("", 0),
         ]
-        y = 200
+        y = 190
         for text, kind in lines:
             f = self.f_h2 if kind == 1 else self.f
             col = KNOWN if kind <= 1 else STALE
             self.t(text, x + (24 if kind == 2 else 0), y, f, col)
-            y += 26 if text else 12
+            y += 24 if text else 10
         self.rule(x, y + 8, 900)
         y += 26
         keys = [("ENTER", "begin, and end each year"), ("click a province", "prices on file, and the clerk's note"),
                 ("T", "the ledger — every province at once"), ("P", "the settlement — who can block you"),
+                ("X", "the exchequer — what you can tax, and what it costs them"),
                 ("F1", "the truth")]
         for k, v in keys:
-            self.t(k, x, y, self.f, GOLD); self.t(v, x + 150, y, self.f_sm, STALE); y += 22
-        self.t("Press ENTER to begin.", x, y + 22, self.f_h2, KNOWN)
+            self.t(k, x, y, self.f, GOLD); self.t(v, x + 150, y, self.f_sm, STALE); y += 20
+        # Anchored to the window, not to however long the key list happens to be —
+        # adding one key pushed this line off the bottom of the screen.
+        self.t("Press ENTER to begin.", x, min(y + 22, H - 44), self.f_h2, KNOWN)
 
     def draw_ledger(self):
         """The spread, all at once. Diagnosis is reading ACROSS provinces and goods —
         one province at a time cannot show you 'here' versus 'everywhere'."""
         g = self.g
-        panel = pygame.Rect(24, 96, 654, 528)
+        # 500, not 528: at 528 the panel bottom sat at 624 and covered the log's
+        # rule and its THE YEAR header at 600.
+        panel = pygame.Rect(24, 96, 654, 500)
         pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
         pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
         x, y = panel.x + 16, panel.y + 12
@@ -353,7 +364,18 @@ class UI:
             return o.value if o else -1.0
         live.sort(key=grain, reverse=True)
 
-        for p in live:
+        # The table is sorted dearest-first, so if it does not all fit, the rows that
+        # get cut are the cheapest — the ones a player scanning for a dearth does not
+        # need. Say how many were cut rather than silently ending the list, and leave
+        # room for the summary underneath. (The end screen had the opposite bug: it
+        # drew past the bottom of the window and took the closing line with it.)
+        row_h, summary_h = 22, 74
+        fits = max(4, (panel.bottom - y - summary_h) // row_h)
+        shown, cut = live, max(0, len(live) - fits)
+        if cut:
+            shown = live[:fits]
+
+        for p in shown:
             self.t(p.name, x, y, self.f, KNOWN)
             ob = g.beliefs.get_pop(p.key)
             if ob:
@@ -382,6 +404,9 @@ class UI:
                 self.tr(f"{price_of(p,'grain'):,.0f}", panel.right - 14, y, self.f_sm, TRUTH)
             y += 22
 
+        if cut:
+            self.t(f"and {cut} more, cheaper, not shown", x, y, self.f_sm, STALE)
+            y += 22
         y += 6
         self.rule(x, y, panel.width - 32); y += 10
         vals = [g.beliefs.get_price(p.key, "grain") for p in live]
@@ -404,11 +429,24 @@ class UI:
             y += 20
         missing = [p.name for p in live if not g.beliefs.get_price(p.key, "grain")]
         if missing:
-            self.t(f"No return at all from: {', '.join(missing)}", x, y, self.f_sm, RED)
+            # This is the line that tells the player the fog is not uniform, so it must
+            # stay inside the panel rather than running off both edges as the map grows.
+            lead, avail = "No return at all from: ", panel.right - 16 - x
+            names, dropped = [], 0
+            for nm in missing:
+                trial = lead + ", ".join(names + [nm])
+                if self.f_sm.size(trial + f" and {len(missing)} more")[0] > avail:
+                    dropped = len(missing) - len(names)
+                    break
+                names.append(nm)
+            txt = lead + ", ".join(names) + (f" and {dropped} more" if dropped else "")
+            self.t(txt, x, min(y, panel.bottom - 22), self.f_sm, RED)
 
     def draw_exchequer(self):
         g = self.g
-        panel = pygame.Rect(24, 96, 654, 528)
+        # 500, not 528: at 528 the panel bottom sat at 624 and covered the log's
+        # rule and its THE YEAR header at 600.
+        panel = pygame.Rect(24, 96, 654, 500)
         pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
         pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
         x, y = panel.x + 18, panel.y + 14
@@ -425,44 +463,49 @@ class UI:
         self.tax_btn = {}
         for t in TAXES:
             ok = g.tax_available(t.key)
-            box = pygame.Rect(x, y, panel.width - 36, 112)
+            box = pygame.Rect(x, y, panel.width - 36, 100)
             pygame.draw.rect(self.screen, PARCH if ok else (222, 214, 196), box, border_radius=3)
             pygame.draw.rect(self.screen, RULE, box, 1, border_radius=3)
             self.t(t.name, x + 14, y + 10, self.f_h2, KNOWN if ok else STALE)
             if not ok:
                 self.t(f"unavailable — needs legibility {t.needs*100:.0f}%",
                        x + 300, y + 16, self.f_sm, RED)
-            self.t(t.blurb, x + 14, y + 38, self.f_sm, STALE)
-            self.t(f"falls on {t.incidence}", x + 14, y + 56, self.f_sm,
+            self.t(t.blurb, x + 14, y + 34, self.f_sm, STALE)
+            self.t(f"falls on {t.incidence}", x + 14, y + 52, self.f_sm,
                    BELIEVED if ok else STALE)
             rate = g.tax[t.key]
-            pygame.draw.rect(self.screen, PARCH_DK, (x + 14, y + 84, 300, 10), border_radius=2)
+            pygame.draw.rect(self.screen, PARCH_DK, (x + 14, y + 76, 300, 10), border_radius=2)
             if ok:
-                pygame.draw.rect(self.screen, GOLD, (x + 14, y + 84, int(300 * rate), 10),
+                pygame.draw.rect(self.screen, GOLD, (x + 14, y + 76, int(300 * rate), 10),
                                  border_radius=2)
-            self.t(f"{rate*100:.0f}%", x + 326, y + 78, self.f, KNOWN if ok else STALE)
+            self.t(f"{rate*100:.0f}%", x + 326, y + 70, self.f, KNOWN if ok else STALE)
             if ok:
-                minus = pygame.Rect(x + 380, y + 76, 30, 26)
-                plus = pygame.Rect(x + 416, y + 76, 30, 26)
+                minus = pygame.Rect(x + 380, y + 68, 30, 26)
+                plus = pygame.Rect(x + 416, y + 68, 30, 26)
                 for r, lab in ((minus, "-"), (plus, "+")):
                     pygame.draw.rect(self.screen, PARCH_DK, r, border_radius=3)
                     pygame.draw.rect(self.screen, RULE, r, 1, border_radius=3)
                     self.t(lab, r.x + 11, r.y + 3, self.f, KNOWN)
                 self.tax_btn[("-", t.key)] = minus
                 self.tax_btn[("+", t.key)] = plus
-            y += 122
+            y += 110
 
         burden = st_mean([p.tax_burden for p in g.provs
                           if p.key not in g.lost_provinces] or [0])
-        self.rule(x, panel.bottom - 66, panel.width - 36)
+        # Anchored to where the tax blocks actually end, not to the panel edge: the
+        # second line was being drawn across the panel border and cut in half.
+        sy = min(y + 6, panel.bottom - 62)
+        self.rule(x, sy, panel.width - 36)
         self.t(f"You are taking {burden*100:.0f}% of what your subjects earn.",
-               x, panel.bottom - 54, self.f, RED if burden > 0.4 else INK)
+               x, sy + 12, self.f, RED if burden > 0.4 else INK)
         self.t("It is not available to them for bread. That is the whole trade.",
-               x, panel.bottom - 30, self.f_sm, STALE)
+               x, sy + 36, self.f_sm, STALE)
 
     def draw_politics(self):
         g = self.g
-        panel = pygame.Rect(24, 96, 654, 528)
+        # 500, not 528: at 528 the panel bottom sat at 624 and covered the log's
+        # rule and its THE YEAR header at 600.
+        panel = pygame.Rect(24, 96, 654, 500)
         pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
         pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
         x, y = panel.x + 18, panel.y + 14

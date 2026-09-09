@@ -18,6 +18,44 @@ import pygame
 from game.main import UI, PARCH, LINES
 
 
+# Every layout bug found tonight was the same bug: text drawn past the bottom of
+# the window, or past the edge of the panel it belongs to. The end screen's closing
+# line, the exchequer's last sentence, the ledger's "no return" list, and then
+# "Press ENTER to begin" the moment one key was added to the brief. Finding them by
+# eye does not scale and did not catch them the first time. So measure instead:
+# every string the UI draws reports its own rectangle, and anything outside the
+# window is a failure.
+OVERFLOWS: list = []
+_PANEL_LEFT, _PANEL_RIGHT = 24, 678   # the left-hand panel, where most text lives
+
+
+def instrument(ui):
+    """Wrap the two text primitives so each draw records where it landed."""
+    from game.main import W, H
+    real_t, real_tr = ui.t, ui.tr
+
+    def note(surf, x, y, s):
+        r = pygame.Rect(x, y, surf.get_width(), surf.get_height())
+        if r.right > W or r.bottom > H or r.x < 0 or r.y < 0:
+            OVERFLOWS.append((CURRENT[0], str(s)[:60], r.x, r.y, r.right, r.bottom))
+
+    def t(s, x, y, font=None, col=None):
+        f = font or ui.f
+        note(f.render(str(s), True, (0, 0, 0)), x, y, s)
+        return real_t(s, x, y, font, col) if col is not None else real_t(s, x, y, font)
+
+    def tr(s, x, y, font=None, col=None):
+        f = font or ui.f
+        surf = f.render(str(s), True, (0, 0, 0))
+        note(surf, x - surf.get_width(), y, s)
+        return real_tr(s, x, y, font, col) if col is not None else real_tr(s, x, y, font)
+
+    ui.t, ui.tr = t, tr
+
+
+CURRENT = ["?"]
+
+
 def render(ui):
     """The draw dispatch from UI.run, minus the event loop."""
     ui.screen.fill(PARCH)
@@ -39,6 +77,7 @@ def render(ui):
 
 
 def shot(ui, outdir, name):
+    CURRENT[0] = name
     render(ui)
     path = os.path.join(outdir, name + ".png")
     pygame.image.save(ui.screen, path)
@@ -68,6 +107,7 @@ def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "shots"
     os.makedirs(outdir, exist_ok=True)
     ui = UI()
+    instrument(ui)
     print(f"PANEL SHOTS -> {outdir}/")
 
     shot(ui, outdir, "01-brief")
@@ -117,6 +157,15 @@ def main():
     shot(ui, outdir, "11-end")
     print(f"\n{len(os.listdir(outdir))} frames written")
 
+    print("\nLAYOUT  (nothing may be drawn outside the window)")
+    if OVERFLOWS:
+        for panel, text, x, y, r, b in OVERFLOWS:
+            print(f"  OFF-SCREEN  [{panel}] ({x},{y})-({r},{b})  {text!r}")
+        print(f"\n{len(OVERFLOWS)} strings drawn outside the window")
+        return 1
+    print("  every string lands inside the window")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
