@@ -847,11 +847,19 @@ class UI:
             if e.key == pygame.K_s:
                 self.g.log.insert(0, self.g.save())
             if e.key == pygame.K_l:
-                loaded = self.g.__class__.load()
+                # A damaged or foreign save must not end the run in progress. Say what
+                # is wrong in the log and carry on with the game already in hand.
+                try:
+                    loaded = self.g.__class__.load()
+                except Game.BadSave as bad:
+                    self.g.log.insert(0, str(bad))
+                    loaded = None
                 if loaded:
                     self.g = loaded
                     self.detail = None; self.politics = False
                     self.g.log.insert(0, "Loaded.")
+                elif loaded is None and not self.g.log[:1]:
+                    self.g.log.insert(0, "There is no saved game to load.")
             if e.key == pygame.K_p:
                 self.politics = not self.politics
                 self.detail = None; self.ledger = False

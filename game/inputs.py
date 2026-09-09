@@ -138,6 +138,43 @@ def main():
     check("S saves and L loads it back", ui.g.year == year_at_save,
           f"{ui.g.year} vs {year_at_save}")
 
+    # A damaged or foreign save must not end the run in progress. This is the one
+    # place a player can hand the game a file, and every malformed one used to come
+    # back as a raw exception through the L key, which had no guard at all.
+    import json, tempfile
+    from game.sim import Game
+    ui.frame()
+    ui.g.save("save.json")
+    good = json.load(open("save.json"))
+    bad_saves = {
+        "damaged":        "",
+        "not a save":     '{"hello": "world"}',
+        "truncated":      json.dumps(good)[: len(json.dumps(good)) // 2],
+        "another map":    json.dumps({**good, "provs": good["provs"][:-1]}),
+        "bad value":      json.dumps({**good, "scalars": {"treasury": "lots"}}),
+    }
+    survived, refused = True, 0
+    year_before = ui.g.year
+    # Identity, not field equality: a save of the same turn with one province cut out
+    # loads with the same year and the same treasury, so comparing those counted a
+    # silent partial load as a refusal. Refusing means keeping the game in hand.
+    for name, text in bad_saves.items():
+        open("save.json", "w").write(text)
+        held = ui.g
+        try:
+            key(ui, pygame.K_l)
+        except Exception:
+            survived = False
+            break
+        if ui.g is held:
+            refused += 1
+    check("a damaged save is refused without ending the run",
+          survived and refused == len(bad_saves),
+          f"{refused} of {len(bad_saves)} refused" + ("" if survived else "  (one raised)"))
+    open("save.json", "w").write(json.dumps(good))
+    key(ui, pygame.K_l)
+    check("and a good save still loads after a bad one", ui.g.year == year_before)
+
     # play the rest out through the handlers alone, answering crises by key and by
     # click in turn, and confirm the game actually ends
     crises_by_key = crises_by_click = 0

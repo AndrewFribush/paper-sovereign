@@ -1617,14 +1617,65 @@ class Game:
             json.dump(self.to_dict(), f)
         return f"Saved to {path}."
 
+    class BadSave(Exception):
+        """A save file that cannot be trusted. Carries what to tell the player."""
+
     @classmethod
     def load(cls, path="save.json"):
+        """Return a Game, or raise BadSave with a sentence a player can read.
+
+        Every malformed file used to come out of here as a raw exception —
+        JSONDecodeError on a truncated write, KeyError on a save from a different
+        map — straight through the L key, which had no guard. A corrupt save file
+        killed the process and took the player's run with it. Worse, a save missing
+        a province loaded *silently* as a partial world.
+        """
         if not os.path.exists(path):
             return None
-        with open(path) as f:
-            d = json.load(f)
+        try:
+            with open(path) as f:
+                d = json.load(f)
+        except (json.JSONDecodeError, OSError) as ex:
+            raise cls.BadSave(f"The save file is damaged and cannot be read ({ex.__class__.__name__}).")
+        if not isinstance(d, dict):
+            raise cls.BadSave("That file is not a saved game.")
+        for req in ("scalars", "lost", "provs", "settlement", "beliefs"):
+            if not isinstance(d.get(req), (dict, list)):
+                raise cls.BadSave(f"That save is missing its {req}; it may be from another version.")
         g = cls(7)
+        keys = {p.key for p in g.provs}
+        saved = {pd.get("key") for pd in d["provs"] if isinstance(pd, dict)}
+        if saved != keys:
+            missing = ", ".join(sorted(keys - saved)) or "none"
+            extra = ", ".join(sorted(saved - keys)) or "none"
+            raise cls.BadSave(
+                f"That save is of a different country (missing: {missing}; unknown: {extra}).")
+        try:
+            return cls._restore(g, d)
+        except cls.BadSave:
+            raise
+        except Exception as ex:
+            raise cls.BadSave(
+                f"That save could not be read back ({type(ex).__name__}); it may be from another version.")
+
+    @staticmethod
+    def _restore(g, d):
+        # Type-check against the live game rather than trusting the file. A scalar of
+        # the wrong type ({"treasury": "lots"}) used to load cleanly and then crash a
+        # dozen operations later, in arithmetic that had nothing to do with the cause.
         for k, v in d["scalars"].items():
+            if not hasattr(g, k):
+                raise Game.BadSave(f"That save mentions {k!r}, which this version does not have.")
+            want = type(getattr(g, k))
+            if want in (int, float):
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise Game.BadSave(f"That save has a bad value for {k!r}.")
+            elif want is bool:
+                if not isinstance(v, bool):
+                    raise Game.BadSave(f"That save has a bad value for {k!r}.")
+            elif want is str:
+                if not isinstance(v, str):
+                    raise Game.BadSave(f"That save has a bad value for {k!r}.")
             setattr(g, k, v)
         g.lost_provinces = d["lost"]
         g.tax = d.get("tax", g.tax)
