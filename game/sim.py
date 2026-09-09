@@ -979,8 +979,14 @@ class Game:
         n = max(1, len(self.provs))
         overrode = [h for h in self.settlement if h.overridden]
 
-        if lost >= n * 0.35:
-            return "Most of it is not yours any more. What is left, you hold."
+        # There was an ending here for losing most of the country. It was unreachable:
+        # the worst territorial loss this game can produce is 3 of 14 provinces (21%),
+        # achieved by spending nothing for twenty years, maxing every tax, breaking
+        # every holder and taking the worst option in every crisis. An ending that
+        # says "most of it is not yours any more" after losing a fifth of it would be
+        # a lie, so the ending is gone rather than the threshold lowered. Whether the
+        # neighbour SHOULD be able to take more than 3 of 14 is a design question,
+        # recorded in BUILD-LOG under Needs Andrew.
 
         if overrode and self.register_quality < 0.25:
             head = ("You broke what stood in your way and found nothing behind it. "

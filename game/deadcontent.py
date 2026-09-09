@@ -76,6 +76,20 @@ def play(style: str, mix: dict, seed: int):
 
 
 
+
+def _ending_count() -> int:
+    """How many distinct endings _ending() can return, counted from the source so it
+    cannot drift from the code the way a hand-maintained number would."""
+    import inspect, re
+    try:
+        src = inspect.getsource(Game._ending)
+    except (OSError, AttributeError):
+        return 0
+    heads = set(re.findall(r'head = \(?"([^"]{8,})', src))
+    heads |= set(re.findall(r'head = f"([^"]{8,})', src))
+    return len(heads)
+
+
 def _responds(line_key: str, link: str) -> float | None:
     """How much a line's own binding link rises when that line is funded hard,
     against leaving it alone. Above 1 means the instrument builds its own ceiling."""
@@ -198,6 +212,44 @@ def main():
     # clerk's note is that layer, and it is the one surface where a regression looks
     # like nothing at all: a diagnosis that collapses to a single sentence, or falls
     # silent, still renders a panel and still passes every other harness.
+    # Endings are content. One written against a guessed threshold turned out to
+    # describe a state the game cannot produce — losing most of the country, when the
+    # worst loss achievable is 3 of 14 — and nothing would have noticed.
+    print("\nENDINGS  (an ending nobody can reach is a page nobody reads)")
+    endings = Counter()
+    for seed in list(seeds)[:4]:
+        for style, mix in STYLES.items():
+            for breaker in (False, True):
+                g = Game(seed)
+                g.collect()
+                turn = 0
+                while not g.game_over:
+                    if g.crisis:
+                        g.choose(g.crisis.choices[0].key)
+                        continue
+                    if breaker and turn == 2:
+                        for h in g.settlement:
+                            if not h.overridden and not h.hard:
+                                g.override(h.key)
+                                break
+                    t = g.treasury
+                    for k in g.budget:
+                        g.budget[k] = 0.0
+                    for k, v in mix.items():
+                        g.budget[k] = t * v
+                    g.end_turn(); g.notice = []
+                    if not g.game_over:
+                        g.collect()
+                    turn += 1
+                endings[g.ending.split(".")[0]] += 1
+    written = _ending_count()
+    print(f"  {len(endings)} of {written} endings reached across {len(STYLES)} styles, "
+          f"4 seeds, with and without breaking the settlement")
+    for e, c in endings.most_common():
+        print(f"    {c:4}  {e}")
+    if written and len(endings) < written:
+        print(f"  UNREACHED  {written - len(endings)} ending(s) no play in this sweep produces")
+
     print("\nDIAGNOSIS  (the explanatory layer is the game — does it say anything?)")
     notes, inspected, silent = Counter(), 0, 0
     for seed in list(seeds)[:4]:
@@ -249,6 +301,8 @@ def main():
         bad = True
 
     faults = []
+    if written and len(endings) < written:
+        faults.append(f"{written - len(endings)} unreachable ending(s)")
     if informative < 0.20: faults.append("the clerk almost never speaks")
     if distinct < 8:       faults.append("the diagnosis layer is not differential")
     if share > 0.55:       faults.append("one reading dominates the diagnosis layer")
