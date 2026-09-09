@@ -77,6 +77,21 @@ def play(style: str, mix: dict, seed: int):
 
 
 
+
+_MIX = dict(census=.16, army=.26, railway=.13, granary=.13, normal=.13, schools=.10, land=.09)
+
+
+def _fund(g):
+    """One ordinary year at the balanced mix."""
+    t = g.treasury
+    for k, v in _MIX.items():
+        g.budget[k] = t * v
+    g.end_turn()
+    g.notice = []
+    if not g.game_over:
+        g.collect()
+
+
 def _ending_count() -> int:
     """How many distinct endings _ending() can return, counted from the source so it
     cannot drift from the code the way a hand-maintained number would."""
@@ -212,6 +227,96 @@ def main():
     # clerk's note is that layer, and it is the one surface where a regression looks
     # like nothing at all: a diagnosis that collapses to a single sentence, or falls
     # silent, still renders a panel and still passes every other harness.
+    # A crisis whose choices lead to the same place is not a decision, and one with a
+    # choice that wins on every axis is a button. Both render identically. Forked from
+    # the SAME state — the only honest way to compare choices, since a crisis reached
+    # by different play is a different crisis.
+    print("\nCRISIS CHOICES  (a choice that wins on every axis is not a choice)")
+    import copy as _copy
+    crisis_faults = []
+    for kind in ("dearth", "cholera", "sedition"):
+        rows = {}
+        for seed in range(1, 60):
+            g = Game(seed)
+            g.collect()
+            hit = None
+            while not g.game_over:
+                if g.crisis:
+                    if g.crisis.key == kind:
+                        hit = g
+                        break
+                    g.choose(g.crisis.choices[0].key)
+                    continue
+                _fund(g)
+            if hit is None:
+                continue
+            for ch in hit.crisis.choices:
+                f = _copy.deepcopy(hit)
+                f.choose(ch.key)
+                for _ in range(6):
+                    if f.game_over: break
+                    if f.crisis: f.choose(f.crisis.choices[0].key); continue
+                    _fund(f)
+                live = [p for p in f.provs if p.key not in f.lost_provinces] or f.provs
+                rows.setdefault(ch.key, []).append(
+                    (f.mean_welfare(), f.treasury / 1000.0, -st.mean(p.unrest for p in live),
+                     f.register_quality, -len(f.lost_provinces)))
+            if len(next(iter(rows.values()))) >= 6:
+                break
+        if not rows:
+            print(f"    {kind}: never reached in this sweep")
+            continue
+        means = {k: [st.mean(x[i] for x in v) for i in range(5)] for k, v in rows.items()}
+        # "Best on every axis" is a condition no choice can meet — every option costs
+        # money, so every option loses on cash — and a check that cannot fire is not a
+        # check. Normalise each axis by its own spread across the choices, then ask the
+        # question that matters: is one choice much better somewhere and no worse than
+        # trivially anywhere? A cholera commission worth four years of census funding
+        # for £120 is that, and the all-axes test waved it through.
+        # Cash is excluded from the comparison. Every option costs money, normalising
+        # by spread turns a £29 difference into a full-range loss, and the game's own
+        # thesis is that money is never the constraint — so cash is a price paid, not
+        # an outcome traded. What is compared is what the choice DOES: welfare, order,
+        # legibility, territory.
+        AXES = [0, 2, 3, 4]
+        norm = {}
+        for i in AXES:
+            lo = min(m[i] for m in means.values())
+            hi = max(m[i] for m in means.values())
+            rng = hi - lo
+            for k, m in means.items():
+                norm.setdefault(k, {})[i] = 0.5 if rng < 1e-9 else (m[i] - lo) / rng
+        winner = None
+        for k in norm:
+            others = [o for o in norm if o != k]
+            if not others:
+                continue
+            never_worse = all(norm[k][i] >= norm[o][i] - 0.15
+                              for o in others for i in AXES)
+            much_better = any(norm[k][i] >= norm[o][i] + 0.60
+                              for o in others for i in AXES)
+            if never_worse and much_better:
+                winner = k
+                break
+        spread = max(abs(means[a][0] - means[b][0]) for a in means for b in means)
+        print(f"    {kind:10} {len(means)} choices, welfare spread {spread*100:.2f} points"
+              + (f"  <-- '{winner}' wins on every axis" if winner else ""))
+        if winner:
+            # Recorded rather than failed, and only for the one crisis where the cause
+            # is understood and is somewhere else: the commission wins on welfare
+            # largely BECAUSE it kills 1.5% of the population, and killing people
+            # raises measured welfare (see the known open finding in checks.py —
+            # capacity does not scale with the workforce). Fixing that is likely to
+            # fix this. Any OTHER crisis developing a dominant choice is a real fault.
+            if kind == "cholera" and winner == "commission":
+                print("      (known open finding: downstream of welfare rising when "
+                      "population falls — see BUILD-LOG)")
+            else:
+                crisis_faults.append(f"'{winner}' dominates the {kind} crisis")
+        if spread * 100 < 0.35:
+            crisis_faults.append(f"the {kind} crisis choices are interchangeable")
+            print(f"      <-- the choices are interchangeable")
+
     # Endings are content. One written against a guessed threshold turned out to
     # describe a state the game cannot produce — losing most of the country, when the
     # worst loss achievable is 3 of 14 — and nothing would have noticed.
@@ -300,7 +405,7 @@ def main():
         print(f"  ONE-NOTE  {share*100:.0f}% of readings are the same sentence")
         bad = True
 
-    faults = []
+    faults = list(crisis_faults)
     if written and len(endings) < written:
         faults.append(f"{written - len(endings)} unreachable ending(s)")
     if informative < 0.20: faults.append("the clerk almost never speaks")

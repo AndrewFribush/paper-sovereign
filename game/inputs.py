@@ -175,6 +175,23 @@ def main():
     key(ui, pygame.K_l)
     check("and a good save still loads after a bad one", ui.g.year == year_before)
 
+    # The Budget guard must not break copying. It did: copy rebuilds a dict subclass
+    # by constructing an empty one and assigning keys, which the guard refuses, so
+    # deepcopy(Game) raised "no budget line 'census'; the lines are []". A guard that
+    # breaks a standard operation has traded one bug for another.
+    import copy as _copy
+    twin = _copy.deepcopy(ui.g)
+    twin.budget[LINES[0].key] = 123.0
+    copy_ok = (twin.budget[LINES[0].key] == 123.0
+               and ui.g.budget[LINES[0].key] != 123.0)
+    still_guarded = False
+    try:
+        twin.budget["rail"] = 1.0
+    except KeyError:
+        still_guarded = True
+    check("a game can be copied, and the copy still refuses unknown budget lines",
+          copy_ok and still_guarded, f"copied={copy_ok} guarded={still_guarded}")
+
     # play the rest out through the handlers alone, answering crises by key and by
     # click in turn, and confirm the game actually ends
     crises_by_key = crises_by_click = 0

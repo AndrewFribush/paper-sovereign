@@ -563,6 +563,13 @@ class Budget(dict):
                 f"no budget line {key!r}; the lines are {sorted(self)}")
         dict.__setitem__(self, key, value)
 
+    def __reduce__(self):
+        # copy and deepcopy rebuild a dict subclass by constructing an empty one and
+        # then assigning keys, which this class refuses — so copying a Game raised
+        # "no budget line 'census'; the lines are []". Hand the whole mapping to the
+        # constructor instead, which goes through dict.__init__ and not __setitem__.
+        return (self.__class__, (dict(self),))
+
 
 @dataclass
 class Crisis:
@@ -1480,7 +1487,14 @@ class Game:
         elif key == "commission":
             if self.treasury >= 120 and self.clerks > 0.25:
                 self.treasury = max(0.0, self.treasury - 120)
-                self.register_quality = min(1.0, self.register_quality + 0.22)
+                # A mortality commission does leave you a register of the dead, and
+                # that is a register — but it was granting +0.22, which is FOUR AND A
+                # HALF YEARS of putting the entire treasury into the census (+0.048/yr
+                # measured), for £120 and one crisis click. Same failure as the muster
+                # roll: a side channel beating the dedicated instrument on its own
+                # axis. Sized at roughly a year and a half of strong census funding —
+                # a real windfall, not a shortcut past the pillar.
+                self.register_quality = min(1.0, self.register_quality + 0.075)
                 for p in self.provs: p.pop *= 0.985
                 self.unlocked.add("vital")
                 out = ["The commission reports. The mortality was worse than believed.",
