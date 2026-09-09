@@ -194,6 +194,65 @@ def main():
                 note = f"  — and nothing the player funds moves {held} ({(lift-1)*100:+.0f}%): a dead end"
             print(f"    {l.name}: peaks at {r*100:.0f}%, held by {held}{note}")
 
+    # "The sim is the engine; the explanatory layer is the game" (design §2). The
+    # clerk's note is that layer, and it is the one surface where a regression looks
+    # like nothing at all: a diagnosis that collapses to a single sentence, or falls
+    # silent, still renders a panel and still passes every other harness.
+    print("\nDIAGNOSIS  (the explanatory layer is the game — does it say anything?)")
+    notes, inspected, silent = Counter(), 0, 0
+    for seed in list(seeds)[:4]:
+        for style, mix in STYLES.items():
+            g = Game(seed)
+            g.collect()
+            while not g.game_over:
+                if g.crisis:
+                    g.choose(g.crisis.choices[0].key)
+                    continue
+                t = g.treasury
+                for k in g.budget:
+                    g.budget[k] = 0.0
+                for k, v in mix.items():
+                    g.budget[k] = t * v
+                g.end_turn(); g.notice = []
+                if not g.game_over:
+                    g.collect()
+                for prov in g.provs:
+                    if prov.key in g.lost_provinces:
+                        continue
+                    d = g.diagnose(prov.key)
+                    inspected += 1
+                    if not d or "Nothing anomalous" in d[0]:
+                        silent += 1
+                    else:
+                        # the WHOLE note, not its first line: the differential is in
+                        # the follow-ups ("cloth is unmoved, so this is not a money
+                        # event", "freight from here is 2.95, suspect the route"), and
+                        # counting headlines alone reported four diagnoses where the
+                        # layer actually distinguishes far more situations than that
+                        notes[" / ".join(x.strip() for x in d)] += 1
+    informative = 1.0 - silent / max(1, inspected)
+    distinct = len(notes)
+    top = notes.most_common(1)[0] if notes else ("(none)", 0)
+    share = top[1] / max(1, sum(notes.values()))
+    print(f"  {inspected:,} province-years, {informative*100:.0f}% carry a reading, "
+          f"{distinct} distinct diagnoses")
+    for n, c in notes.most_common(5):
+        print(f"    {c*100/max(1,sum(notes.values())):5.1f}%  {n[:88]}")
+    if informative < 0.20:
+        print("  THIN   the clerk almost never has anything to say")
+        bad = True
+    if distinct < 8:
+        print(f"  FLAT   only {distinct} distinct readings — the layer is not differential")
+        bad = True
+    if share > 0.55:
+        print(f"  ONE-NOTE  {share*100:.0f}% of readings are the same sentence")
+        bad = True
+
+    faults = []
+    if informative < 0.20: faults.append("the clerk almost never speaks")
+    if distinct < 8:       faults.append("the diagnosis layer is not differential")
+    if share > 0.55:       faults.append("one reading dominates the diagnosis layer")
+
     print("\nWALLPAPER  (a message the player stops reading is worse than none)")
     total_years = len(STYLES) * len(list(seeds)) * 20
     noisy = [(k, v) for k, v in log_freq.most_common(6) if v > total_years * 0.45]
@@ -204,6 +263,11 @@ def main():
         print("  no message fires in more than 45% of years")
         for k, v in log_freq.most_common(4):
             print(f"         '{k}' {100*v/total_years:.0f}%")
+    if noisy:
+        faults += [f"'{k}' is wallpaper" for k, _ in noisy]
+    if bad:
+        faults.append("something is unreachable")
+    return faults
 
 
 def thresholds():
@@ -262,9 +326,15 @@ def thresholds():
             gate("supply: clamped high", any(
                 (price_of(p, q) / GOODS[q].ref_price) ** (0.35 if q == "grain" else 0.55) > 1.6
                 for p in live for q in GOOD_KEYS))
-            gate("supply: clamped low", any(
-                (price_of(p, q) / GOODS[q].ref_price) ** (0.35 if q == "grain" else 0.55) < 0.55
-                for p in live for q in GOOD_KEYS))
+            # A share, not an `any`. Across fourteen provinces and five goods this is
+            # seventy chances for one pair to be at the low clamp, so `any` was true
+            # in 100% of years by construction and the gate measured nothing. What
+            # matters — and what the design's rule about clamps actually says — is
+            # whether a MEANINGFUL FRACTION of the market is pinned there.
+            low = [1 for p in live for q in GOOD_KEYS
+                   if (price_of(p, q) / GOODS[q].ref_price) ** (0.35 if q == "grain" else 0.55) < 0.55]
+            gate("supply: clamped low (>15% of the market)",
+                 len(low) > 0.15 * len(live) * len(GOOD_KEYS))
             gate("price: at floor", any(
                 price_of(p, q) <= GOODS[q].ref_price * GOODS[q].floor * 1.001
                 for p in live for q in GOOD_KEYS))
@@ -278,8 +348,12 @@ def thresholds():
     #  - a safety clamp SHOULD read 0%. It is a backstop; reaching it is the failure.
     #  - the belief-age gates are per-province display styling, and one province is
     #    never censused, so "any province is stale" is 100% by construction.
+    # Backstops: a clamp the market is not supposed to reach. Measured, the share of
+    # the market at the low supply clamp runs median 3.1%, max 7.1% — so a gate at
+    # 15% correctly never fires, and its firing would mean the clamp had become an
+    # operating state, which is the thing the design forbids.
     EXEMPT_LOW = {"price: at ceiling", "price: at floor", "supply: clamped high",
-                  "supply: clamped low"}
+                  "supply: clamped low (>15% of the market)"}
     EXEMPT_HIGH = {"ui: belief stale (>12y)", "ui: belief ancient (>25y)",
                    # at least one province has no merchant in almost every run, which
                    # is the design working, not a gate that fails to gate
@@ -369,6 +443,16 @@ def links():
 
 
 if __name__ == "__main__":
-    main()
-    thresholds()
-    links()
+    # This module used to exit 0 no matter what it found, so verify.sh reported ALL
+    # GREEN with dead content in the build. A finding nobody has to act on is a
+    # finding nobody acts on. CONSTRAINED and "never binds" stay advisory — they are
+    # descriptions of a working design — but unreachable content, a diagnosis layer
+    # that has stopped being differential, a gate that never fires or always fires,
+    # and a saturated link are faults.
+    import sys
+    problems = (main() or []) + (thresholds() or []) + (links() or [])
+    print()
+    if problems:
+        print(f"{len(problems)} PROBLEM(S): " + "; ".join(str(x) for x in problems))
+        sys.exit(1)
+    print("nothing dead, nothing saturated, nothing wallpaper")
