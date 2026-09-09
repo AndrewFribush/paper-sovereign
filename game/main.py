@@ -477,7 +477,19 @@ class UI:
             pygame.draw.rect(self.screen, col, (bar_x, bar_y, int(260 * bv), 8), border_radius=2)
             self.t(f"limited by {LINK_NAMES[binding].lower()}  {bv*100:.0f}%",
                    bar_x + 270, y + 38, self.f_sm, col)
-            y += 66
+            # A railway is all-or-nothing: 2.5 accumulated throughput buys one line and
+            # a part-built line is no line. Without showing the accumulation, a player
+            # funding it lightly pays for twenty years and sees nothing happen.
+            if line.key == "railway":
+                need = 2.5
+                frac = min(1.0, g.rail_progress / need)
+                self.t(f"survey {g.rail_progress:.1f} of {need:.1f} to the next line",
+                       bar_x, y + 54, self.f_sm, GOLD if frac > 0.5 else STALE)
+                pygame.draw.rect(self.screen, PARCH_DK, (bar_x + 200, y + 58, 90, 6),
+                                 border_radius=2)
+                pygame.draw.rect(self.screen, GOLD, (bar_x + 200, y + 58, int(90 * frac), 6),
+                                 border_radius=2)
+            y += 66 if line.key != "railway" else 74
 
         self.rule(x0, y + 2, W - x0 - 24)
         # When the material constraints are solved, consent becomes the universal

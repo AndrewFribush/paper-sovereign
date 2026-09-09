@@ -1050,8 +1050,14 @@ class Game:
             return
         self.crisis_cool = self.turn + 3
         urban = sum(p.pop * p.bourgeoisie for p in self.provs) / max(1e-6, self.true_pop())
-        dearth = (st_mean([price_of(p, "grain") for p in self.provs]) > GOODS["grain"].ref_price * 3.4
-                  and self.mean_welfare() < 0.86)
+        # Calibrated against the settled market, not the oscillating one. Before the
+        # arbitrage fix grain routinely read 3-6x reference because prices were noise;
+        # the threshold was set there, and once the market cleared it became
+        # unreachable and this crisis silently stopped existing. Measured now:
+        # median 1.18x, p90 2.19x, per-run peak 3.02x.
+        dearth = (st_mean([price_of(p, "grain") for p in self.provs])
+                  > GOODS["grain"].ref_price * 2.0
+                  and self.mean_welfare() < 0.78)
         unrest = st_mean([p.unrest for p in self.provs])
 
         if dearth and self.rng.random() < 0.60:
