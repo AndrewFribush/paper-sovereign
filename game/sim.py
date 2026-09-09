@@ -15,7 +15,7 @@ The thesis being tested (main doc §21):
 """
 
 from __future__ import annotations
-import json, os, random
+import json, math, os, random
 from statistics import mean as st_mean
 from dataclasses import dataclass, field
 
@@ -86,6 +86,7 @@ class Province:
     railed: bool = False
     industry: dict = field(default_factory=dict)   # capital stock per good
     unrest: float = 0.0
+    grievance: float = 0.0   # struck stakes: commons, gleaning, customary right
     # who obstructs here, and how hard (0..1). politics-and-discretion.md
     clergy_strength: float = 0.0
     noble_strength: float = 0.0
@@ -168,8 +169,35 @@ def price_of(prov: Province, good: str) -> float:
     return g.ref_price * ratio
 
 
+def wage_of(prov: Province) -> float:
+    """Money wage. Sticky downward, which is why a price spike against a flat wage is
+    an entitlement signal rather than a supply signal (main doc §9)."""
+    # calibrated against the basket at PREVAILING prices, not reference prices:
+    # grain trades near 3x its reference in an ordinary year, so a wage set against
+    # the reference makes the whole country read as permanently half-starving.
+    base = 17.0 + 25.0 * prov.bourgeoisie + 11.0 * prov.literacy
+    return base * (0.85 + 0.30 * min(1.5, sum(prov.capacity.values()) / max(1.0, prov.pop)))
+
+
+def basket_cost(prov: Province) -> float:
+    """What a year of one person's needs costs at THIS province's prices."""
+    return sum((prov.consumption(g) / max(1e-6, prov.pop)) * price_of(prov, g)
+               for g in GOOD_KEYS)
+
+
 def welfare(prov: Province) -> float:
-    """0..1. How well this province's needs are actually met. TRUTH."""
+    """0..1. TRUTH — never shown to the player except under the inspector.
+
+    Two gates, and the worse one binds (the same Liebig semantics as the delivery
+    chain). AVAILABILITY: is the stuff physically there. AFFORDABILITY: can a wage
+    buy it at the price it is actually trading at.
+
+    The second gate is the entitlement mechanism. Famines are frequently not supply
+    failures — the goods are present and a class can no longer buy them at any price.
+    Without it, welfare cannot see a province where grain is at six times normal, and
+    every price lever in the game (relief, the granary, the railway that collapses
+    freight) becomes invisible to how people actually live.
+    """
     total, met = 0.0, 0.0
     for g in GOOD_KEYS:
         need = prov.consumption(g)
@@ -178,7 +206,12 @@ def welfare(prov: Province) -> float:
         w = 3.0 if g == "grain" else 1.0
         total += w
         met += w * min(1.0, prov.stocks[g] / max(1e-6, need * 0.55))
-    return met / total if total else 1.0
+    availability = met / total if total else 1.0
+
+    ratio = wage_of(prov) / max(1e-6, basket_cost(prov))
+    affordability = 1.0 - math.exp(-1.9 * ratio)
+
+    return max(0.0, min(1.0, min(availability, affordability)))
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +282,9 @@ FRICTION = {
     ("granary", "reach"):      "the grain could not be carted before it spoiled",
     ("army", "legibility"):    "the muster rolls do not answer; the class cannot be found",
     ("army", "consent"):       "the estates will not vote the levy",
+    ("land", "agents"):        "no surveyor could be found to lay out the fields",
+    ("land", "consent"):       "the landowners will not bear the cost of the ditches",
+    ("land", "compliance"):    "the commoners have pulled down the new hedges",
 }
 
 
@@ -280,6 +316,9 @@ LINES = [
     Line("army",    "Army",
          "Tilly does not care what else you were funding.",
          ["money", "legibility", "consent"], 55),
+    Line("land",    "Improvement of the land",
+         "Drainage, enclosure, new rotations. More bread, and a grievance.",
+         ["money", "agents", "consent", "compliance"], 45),
 ]
 LINE_BY_KEY = {l.key: l for l in LINES}
 
@@ -314,7 +353,7 @@ def build_settlement() -> list:
                    {"legibility": 0.26, "compliance": 0.22},
                    "the schools licensed, and the tithe left alone", 55,
                    "you may never preach against them"),
-        VetoHolder("nobles", "The Landowners", ["railway", "census"], 0.70,
+        VetoHolder("nobles", "The Landowners", ["railway", "census", "land"], 0.70,
                    {"reach": 0.24, "compliance": 0.10},
                    "their privileges confirmed, and no survey of their rents", 65,
                    "their exemption becomes customary"),
@@ -470,7 +509,7 @@ class Game:
             return 1.0
         if link == "agents":
             if line_key == "census":  return min(1.0, 0.15 + self.clerks * 1.5)
-            if line_key == "railway": return min(1.0, 0.10 + self.engineers * 1.8)
+            if line_key in ("railway", "land"): return min(1.0, 0.10 + self.engineers * 1.8)
             if line_key in ("schools",): return min(1.0, 0.05 + self.masters * 1.7)
             if line_key == "normal":  return min(1.0, 0.30 + self.masters * 0.8)
             return 1.0
@@ -488,6 +527,13 @@ class Game:
             # the parish register was the census apparatus long before the state had one
             return min(1.0, 0.10 + self.register_quality * 1.6 + self.supplied("legibility"))
         if link == "compliance":
+            if line_key == "land":
+                # the moral economy: commons, gleaning and wood-gathering were a real
+                # fraction of poor subsistence, and a hungry province defends them hardest
+                unrest = sum(p.unrest * p.pop for p in self.provs) / sum(p.pop for p in self.provs)
+                hunger = 1.0 - self.mean_welfare()
+                return max(0.08, min(1.0, 0.95 - unrest * 0.8 - hunger * 0.9
+                                     + self.supplied("compliance")))
             # households only spare children where there is a return to reading
             lit_return = sum(p.bourgeoisie * p.pop for p in self.provs) / sum(p.pop for p in self.provs)
             return min(1.0, 0.18 + lit_return * 1.3 + self.supplied("compliance"))
@@ -689,6 +735,21 @@ class Game:
             for p in self.provs:
                 take = min(p.stocks["grain"] * 0.05, bought / len(self.provs))
                 p.stocks["grain"] -= take
+        elif key == "land":
+            # The one instrument that touches what people actually eat. It also strikes
+            # the moral economy: enclosure takes commons, gleaning and wood-gathering,
+            # which were a real fraction of poor subsistence (main doc §10). More bread
+            # in aggregate, and a specific grievance in the provinces it is done to.
+            for p in self.provs:
+                if p.key in self.lost_provinces:
+                    continue
+                share = through * 0.0035 * (0.5 + p.capacity["grain"] / 30.0)
+                p.capacity["grain"] *= 1.0 + share
+                # the grievance is specific and local: this province lost its commons.
+                # It also feeds back — unrest lowers the compliance link, so enclosure
+                # gets harder the more of it you have already done.
+                p.grievance = min(1.0, p.grievance + share * 22.0)
+            self.engineers = min(1.0, self.engineers + through * 0.012)
         elif key == "army":
             self.army += through * 0.085
             self.register_quality = min(1.0, self.register_quality + through * 0.03)
@@ -711,7 +772,9 @@ class Game:
             if p.key in self.lost_provinces:
                 continue
             w = welfare(p)
-            rate = 0.004 + 0.011 * p.bourgeoisie + 0.010 * (w - 0.6)
+            # capped: welfare feeds population feeds industry feeds bourgeoisie feeds
+            # welfare. Uncapped, that loop runs away and the country doubles.
+            rate = min(0.022, 0.004 + 0.011 * p.bourgeoisie + 0.010 * (w - 0.6))
             p.pop = max(0.5, p.pop * (1.0 + rate))
             # land comes into cultivation with the people. The squeeze the player must answer
             # is the climate excursion, not a structural Malthusianism they have no lever on.
@@ -752,7 +815,9 @@ class Game:
         # unrest follows unmet need, weighted to grain
         for p in self.provs:
             w = welfare(p)
-            p.unrest = max(0.0, min(1.0, p.unrest * 0.75 + (0.75 - w) * 1.1))
+            p.grievance *= 0.94        # a generation to forget an enclosure
+            p.unrest = max(0.0, min(1.0, p.unrest * 0.75 + (0.75 - w) * 1.1
+                                    + p.grievance * 0.9))
 
     def _invest(self):
         """Increasing returns. Main doc §14: agglomeration is not a new system, it is
@@ -1042,7 +1107,7 @@ class Game:
             "unlocked": sorted(self.unlocked),
             "provs": [{"key": p.key, "pop": p.pop, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
-                       "unrest": p.unrest, "stocks": p.stocks, "capacity": p.capacity,
+                       "unrest": p.unrest, "grievance": p.grievance, "stocks": p.stocks, "capacity": p.capacity,
                        "industry": p.industry, "bourgeoisie": p.bourgeoisie}
                       for p in self.provs],
             "settlement": [{"key": h.key, "consent": h.consent,
@@ -1076,7 +1141,7 @@ class Game:
         g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
-            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "stocks", "capacity",
+            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "grievance", "stocks", "capacity",
                       "industry", "bourgeoisie"):
                 setattr(p, k, pd[k])
         for hd in d["settlement"]:
@@ -1092,10 +1157,7 @@ class Game:
         return g
 
     def wage(self, p) -> float:
-        """Money wage. Sticky downward — which is why a price spike against a flat
-        wage is the entitlement-collapse signal rather than a supply signal."""
-        base = 6.0 + 9.0 * p.bourgeoisie + 4.0 * p.literacy
-        return base * (0.85 + 0.30 * min(1.5, sum(p.capacity.values()) / max(1.0, p.pop)))
+        return wage_of(p)
 
     def diagnose(self, key: str) -> list[str]:
         """Differential diagnosis (main doc §9). Reads only what the STATE has on file —
