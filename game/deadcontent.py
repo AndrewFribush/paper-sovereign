@@ -204,16 +204,27 @@ def thresholds():
             gate("welfare: below .5", any(welfare(p) < 0.5 for p in live))
 
     print("\nTHRESHOLDS  (0% is dead content; 100% means the gate is not a gate)")
+    # Two exemptions, both principled:
+    #  - a safety clamp SHOULD read 0%. It is a backstop; reaching it is the failure.
+    #  - the belief-age gates are per-province display styling, and one province is
+    #    never censused, so "any province is stale" is 100% by construction.
+    EXEMPT_LOW = {"price: at ceiling", "price: at floor", "supply: clamped high",
+                  "supply: clamped low"}
+    EXEMPT_HIGH = {"ui: belief stale (>12y)", "ui: belief ancient (>25y)"}
     bad = []
     for name in sorted(tot):
         r = 100 * hits[name] / max(1, tot[name])
         flag = ""
-        if r < 1.0:
+        if r < 1.0 and name not in EXEMPT_LOW:
             flag = "  <-- DEAD"
             bad.append(name)
-        elif r > 97.0:
+        elif r < 1.0:
+            flag = "  (backstop, correctly never reached)"
+        elif r > 97.0 and name not in EXEMPT_HIGH:
             flag = "  <-- ALWAYS TRUE"
             bad.append(name)
+        elif r > 97.0:
+            flag = "  (per-province styling; aggregate is 100% by construction)"
         print(f"  {r:5.1f}%  {name}{flag}")
     if not bad:
         print("\n  every gate fires sometimes and not always")
