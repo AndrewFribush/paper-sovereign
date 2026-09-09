@@ -107,6 +107,77 @@ def bounds():
     check("treasury stays finite", finite)
 
 
+def links_and_scarcity():
+    """Two failure classes that hid twice each and were only ever caught by tracing.
+
+    SATURATION: legibility hit its 1.0 cap by year 3, then again after the map grew.
+    A link at its cap has stopped existing — it binds nothing, gates nothing, and makes
+    the late game look frozen for reasons unrelated to the late game.
+
+    SCARCITY: line costs were absolute while revenue scales with the map, so growing
+    from 8 provinces to 14 tripled income against a fixed price list and money stopped
+    being a constraint at all.
+    """
+    print("\nLINKS AND SCARCITY  (a link at its cap, or money that is never short)")
+    LINKS = ["agents", "reach", "consent", "legibility", "compliance", "substrate"]
+    vals = {k: [] for k in LINKS}
+    treas, revs, money_binds, total_binds = [], [], 0, 0
+    binds_by = Counter()
+    for seed in SEEDS:
+        g = Game(seed)
+        g.collect()
+        while not g.game_over:
+            if g.crisis:
+                g.choose(g.crisis.choices[0].key)
+                continue
+            for l in LINES:
+                b, _ = g.preview(l.key)
+                total_binds += 1
+                binds_by[b] += 1
+                if b == "money":
+                    money_binds += 1
+            for k in LINKS:
+                for l in LINES:
+                    if k in l.links:
+                        vals[k].append(g.link_value(l.key, k))
+                        break
+            t = g.treasury
+            for kk, v in dict(census=.16, army=.26, railway=.13, granary=.13,
+                              normal=.13, schools=.10, land=.09).items():
+                g.budget[kk] = t * v
+            g.end_turn()
+            g.notice = []
+            if not g.game_over:
+                g.collect()
+            treas.append(g.treasury)
+            revs.append(g.revenue())
+
+    # Threshold set from the regression, not by feel. Reintroducing the legibility bug
+    # gives median 0.89 with 46% of line-years above 0.90; fixed it is 0.42 and 0%.
+    # Measuring "strictly at the 1.0 cap" caught only 13% and let the bug through.
+    worst, rate = None, 0.0
+    for k in LINKS:
+        r = sum(1 for v in vals[k] if v > 0.90) / max(1, len(vals[k]))
+        if r > rate:
+            worst, rate = k, r
+    check("no link spends most of a run near its cap", rate < 0.30,
+          f"worst is {worst} at {rate*100:.0f}% of line-years above 0.90")
+    # A high median alone is not the failure — substrate sits near 0.86 and still binds
+    # 15% of the time, so it is doing its job. The failure is high AND never binding:
+    # that is a link the player can neither feel nor act on.
+    inert = [k for k in LINKS
+             if st.median(vals[k]) > 0.85 and binds_by[k] / max(1, total_binds) < 0.05]
+    check("no link is both high and inert", not inert,
+          ", ".join(f"{k} median {st.median(vals[k]):.2f}, binds "
+                    f"{100*binds_by[k]/max(1,total_binds):.0f}%" for k in inert) or "none")
+
+    ratio = st.mean(treas) / max(1e-6, st.mean(revs))
+    check("money stays scarce", ratio < 3.0,
+          f"mean treasury is {ratio:.1f}x mean revenue")
+    check("money is rarely the binding link", money_binds / max(1, total_binds) < 0.20,
+          f"{100*money_binds/max(1,total_binds):.0f}% of line-years")
+
+
 def signal():
     """A clamp reached routinely stops preventing nonsense and starts destroying
     information. This is what the ledger view exposed."""
@@ -232,9 +303,13 @@ def mechanism():
     # What is verified today: the graph responds. Building the line measurably lowers
     # the freight cost between the provinces it connects.
     def pairs_cost(g):
-        ps = [("cap", "ironby"), ("cap", "blackm"), ("cap", "hollin")]
-        return st.mean(g.pair_cost(x, y) for x, y in ps
-                       if x not in g.lost_provinces and y not in g.lost_provinces)
+        # Mean over EVERY pair, not three hardcoded ones. The line extends from
+        # cheapest reach outward, so which provinces it touches changes with the map —
+        # naming pairs meant the check silently measured provinces the rails never
+        # reached and reported "no effect" while five lines were being built.
+        live = [p.key for p in g.provs if p.key not in g.lost_provinces]
+        vals = [g.pair_cost(a, b) for i, a in enumerate(live) for b in live[i + 1:]]
+        return st.mean(vals) if vals else 0.0
     ca, cb = st.mean(pairs_cost(g) for g in a), st.mean(pairs_cost(g) for g in b)
     check("and the line lowers freight between what it connects", ca < cb * 0.9,
           f"{ca:.2f} vs {cb:.2f}")
@@ -242,13 +317,12 @@ def mechanism():
     # line connects, as the excess over parity — which is the form the design states
     # the claim in (the Anglo-American wheat gap fell from ~60% to ~15%).
     def gap(g, S):
+        # Dispersion across every province still held, over the back half of the run.
         out = []
         for s in S[12:]:
-            for x, y in (("cap", "ironby"), ("cap", "blackm"), ("cap", "hollin")):
-                if x in g.lost_provinces or y in g.lost_provinces:
-                    continue
-                px, py = price_of(g.by_key[x], "grain"), price_of(g.by_key[y], "grain")
-                out.append(max(px, py) / max(0.01, min(px, py)))
+            ps = s["prices"]["grain"]
+            if len(ps) >= 2:
+                out.append(max(ps) / max(0.01, min(ps)))
         return st.mean(out) if out else 1.0
     ga = st.mean(gap(g, S) - 1.0 for g, S in zip(a, Sa))
     gb = st.mean(gap(g, S) - 1.0 for g, S in zip(b, Sb))
@@ -407,7 +481,7 @@ def ui_smoke():
 def main():
     print(f"Vicky regression checks — {len(list(SEEDS))} seeds, {N_TURNS} turns, "
           f"{len(LINES)} budget lines")
-    invariants(); bounds(); signal(); welfare_shape()
+    invariants(); bounds(); links_and_scarcity(); signal(); welfare_shape()
     conservation(); mechanism(); thesis(); persistence(); ui_smoke()
     print()
     if FAILS:

@@ -665,10 +665,15 @@ class Game:
         if link == "money":
             return 1.0
         if link == "agents":
-            if line_key == "census":  return min(1.0, 0.15 + self.clerks * 1.5)
-            if line_key in ("railway", "land"): return min(1.0, 0.10 + self.engineers * 1.8)
-            if line_key in ("schools",): return min(1.0, 0.05 + self.masters * 1.7)
-            if line_key == "normal":  return min(1.0, 0.30 + self.masters * 0.8)
+            # Calibrated against each institution's MEASURED peak so the link lands near
+            # 0.85 when the apparatus is fully built, not at its cap. Census was
+            # 0.15 + clerks*1.5 against clerks that peak at 0.83, so it pinned to 1.0
+            # the moment the clerks existed and stopped being a constraint — the same
+            # failure as legibility, in a link nobody had looked at.
+            if line_key == "census":  return min(1.0, 0.10 + self.clerks * 0.90)
+            if line_key in ("railway", "land"): return min(1.0, 0.08 + self.engineers * 1.60)
+            if line_key in ("schools",): return min(1.0, 0.05 + self.masters * 1.25)
+            if line_key == "normal":  return min(1.0, 0.26 + self.masters * 0.80)
             return 1.0
         if link == "reach":
             # How much of your country you can actually get to, weighted by where the
@@ -713,12 +718,18 @@ class Game:
             lit_return = sum(p.bourgeoisie * p.pop for p in self.provs) / sum(p.pop for p in self.provs)
             return min(1.0, 0.06 + lit_return * 0.95 + self.supplied("compliance") * 0.45)
         if link == "substrate":
+            # Both arms were generous enough that substrate never bound anything once
+            # iron supply was fixed — median 0.86 and 0% binding, a link the player
+            # could neither feel nor act on. A line needs rails, not merely iron; a
+            # school needs a press in the province, which is a commercial thing.
+            live = [p for p in self.provs if p.key not in self.lost_provinces] or self.provs
             if line_key == "railway":
-                iron = sum(p.stocks["iron"] for p in self.provs)
-                need = sum(p.consumption("iron") for p in self.provs)
-                return max(0.10, min(1.0, iron / max(1e-6, need * 1.2)))
+                iron = sum(p.stocks["iron"] for p in live)
+                need = sum(p.consumption("iron") for p in live)
+                return max(0.08, min(1.0, iron / max(1e-6, need * 1.35)))
             if line_key == "schools":
-                return min(1.0, 0.25 + sum(p.bourgeoisie for p in self.provs) / len(self.provs))
+                press = sum(p.bourgeoisie * p.literacy for p in live) / max(1, len(live))
+                return max(0.06, min(1.0, 0.12 + press * 3.4))
             return 1.0
         return 1.0
 
@@ -917,18 +928,35 @@ class Game:
         elif key == "railway":
             self.engineers = min(1.0, self.engineers + through * 0.02)
             self.rail_progress += through
-            # the line is pushed outward from the capital: cheapest reach first,
-            # because that is where the cost gradient actually lets it go
-            for p in sorted(self.provs, key=lambda q: q.base_freight):
-                if p.railed or p.key in self.lost_provinces:
-                    continue
-                if self.rail_progress >= 2.5:
-                    self.rail_progress -= 2.5
-                    p.railed = True
-                    self.log.append(f"The line reaches {p.name}.")
-                    self._reflood()
+            # The line EXTENDS. A rail edge carries traffic only if BOTH ends are
+            # railed, so railing the cheapest provinces independently activated two
+            # edges out of five lines built and the network gained nothing — which is
+            # the design's own point that connectivity beats mileage. Grow outward
+            # from what is already connected, taking the province with most to gain.
+            railset = {p.key for p in self.provs if p.railed}
+            while self.rail_progress >= 2.5:
+                if not railset:
+                    nxt = min((p for p in self.provs if p.key not in self.lost_provinces),
+                              key=lambda q: q.base_freight)
                 else:
-                    break
+                    adj = set()
+                    for a, b, m, _d in self.network.edges:
+                        if m != "rail":
+                            continue
+                        if a in railset:
+                            adj.add(b)
+                        if b in railset:
+                            adj.add(a)
+                    reachable = [q for q in self.provs if q.key in adj and not q.railed
+                                 and q.key not in self.lost_provinces]
+                    if not reachable:
+                        break
+                    nxt = max(reachable, key=lambda q: q.freight())
+                self.rail_progress -= 2.5
+                nxt.railed = True
+                railset.add(nxt.key)
+                self.log.append(f"The line reaches {nxt.name}.")
+                self._reflood()
         elif key == "schools":
             for p in self.provs:
                 gain = through * 0.004 * (0.4 + p.bourgeoisie)
