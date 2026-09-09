@@ -33,6 +33,7 @@ GOLD       = (150, 112, 40)
 RED        = (150, 46, 40)
 GREEN      = (58, 100, 52)
 RULE       = (188, 175, 152)
+RIVER      = (108, 128, 138)   # the network the state did not have to build
 
 
 class UI:
@@ -109,19 +110,88 @@ class UI:
         x0, y0 = 30, 104
         self.t("THE COUNTRY", x0, y0, self.f_sm, STALE)
         self.t("as reported", x0 + 120, y0, self.f_sm, BELIEVED)
+        # legend, so the lines mean something the first time they are seen
+        lx = x0 + 250
+        for label, col, wdt in (("road", RULE, 1), ("river", RIVER, 2), ("rail", GOLD, 4)):
+            pygame.draw.line(self.screen, col, (lx, y0 + 7), (lx + 22, y0 + 7), wdt)
+            self.t(label, lx + 28, y0, self.f_sm, STALE)
+            lx += 74
         self.prov_rects = {}
         cw, ch = 118, 74
+
+        # Where each province sits, so the network can be drawn underneath the tiles.
+        centres = {p.key: (x0 - 6 + p.x * 54 + cw // 2, y0 + 24 + p.y * 82 + ch // 2)
+                   for p in g.provs}
+        railed = {p.key for p in g.provs if p.railed}
+        # The railway is the single most expensive thing the player can fund and the
+        # map showed a gold underline per province, which is not a network. Draw the
+        # actual graph: roads and rivers are the country as it came, rail is the only
+        # part the player built. A rail edge is lit only when BOTH ends are railed,
+        # which is the same rule the simulation uses to decide whether it carries
+        # traffic — so what the player sees forming is what is actually working.
+        rects = {p.key: pygame.Rect(x0 - 6 + p.x * 54, y0 + 24 + p.y * 82, cw, ch)
+                 for p in g.provs}
+
+        def span(a, b):
+            """The part of a-to-b that lies between the two tiles, not under them.
+            Drawn centre-to-centre the lines vanish behind the cards and the network
+            reads as unrelated fragments."""
+            (ax, ay), (bx, by) = centres[a], centres[b]
+            dx, dy = bx - ax, by - ay
+            dist = max(1.0, (dx * dx + dy * dy) ** 0.5)
+            steps = int(dist)
+            p1 = p2 = None
+            for i in range(steps + 1):
+                px, py = ax + dx * i / steps, ay + dy * i / steps
+                inside = rects[a].collidepoint(px, py) or rects[b].collidepoint(px, py)
+                if not inside:
+                    if p1 is None:
+                        p1 = (px, py)
+                    p2 = (px, py)
+            return (p1, p2) if p1 and p2 and p1 != p2 else None
+
+        for a, b, mode, _d in g.network.edges:
+            if a not in centres or b not in centres:
+                continue
+            if a in g.lost_provinces or b in g.lost_provinces:
+                continue
+            seg = span(a, b)
+            if not seg:
+                continue
+            pa, pb = seg
+            if mode == "rail":
+                pass          # drawn after the tiles, see below
+            elif mode == "river":
+                pygame.draw.line(self.screen, RIVER, pa, pb, 2)
+            else:
+                pygame.draw.line(self.screen, RULE, pa, pb, 1)
+
+        # Backgrounds first, then the railway, then the text. The line has to sit above
+        # the tiles or a network of five reads as one line, and below the names or it
+        # strikes through them.
         for p in g.provs:
-            gx = x0 - 6 + p.x * 54
-            gy = y0 + 24 + p.y * 82
-            r = pygame.Rect(gx, gy, cw, ch)
+            r = rects[p.key]
             self.prov_rects[p.key] = r
             lost = p.key in g.lost_provinces
-            bg = (206, 196, 176) if lost else PARCH_DK
-            pygame.draw.rect(self.screen, bg, r, border_radius=3)
+            pygame.draw.rect(self.screen, (206, 196, 176) if lost else PARCH_DK,
+                             r, border_radius=3)
+
+        for a, b, mode, _d in g.network.edges:
+            if mode != "rail" or a not in centres or b not in centres:
+                continue
+            if a in g.lost_provinces or b in g.lost_provinces:
+                continue
+            if a not in railed or b not in railed:
+                continue
+            pygame.draw.line(self.screen, PARCH, centres[a], centres[b], 7)
+            pygame.draw.line(self.screen, GOLD, centres[a], centres[b], 3)
+
+        for p in g.provs:
+            r = self.prov_rects[p.key]
+            lost = p.key in g.lost_provinces
             if p.railed:
-                pygame.draw.line(self.screen, GOLD, (r.left + 6, r.bottom - 5),
-                                 (r.right - 6, r.bottom - 5), 3)
+                # marks a railhead: connected to the network, or waiting to be
+                pygame.draw.circle(self.screen, GOLD, (r.right - 11, r.bottom - 10), 4)
             pygame.draw.rect(self.screen, RULE, r, 1, border_radius=3)
             if lost:
                 self.t(p.name[:11], r.x + 7, r.y + 5, self.f_sm, STALE)
@@ -153,6 +223,8 @@ class UI:
                 self.tr(f"{p.pop*1000:,.0f}", r.right - 6, r.y + 22, self.f_sm, TRUTH)
                 self.tr(f"{price_of(p,'grain'):,.1f}", r.right - 6, r.y + 36, self.f_sm, TRUTH)
                 self.tr(f"w{welfare(p):.2f}", r.right - 6, r.y + 50, self.f_sm, TRUTH)
+
+
 
     def spark(self, series, x, y, w, h, col):
         """A price series as the state has it on file. Gaps are gaps."""

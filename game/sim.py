@@ -548,6 +548,22 @@ class Choice:
     hint: str
 
 
+class Budget(dict):
+    """A budget that refuses money for a line that does not exist.
+
+    A plain dict accepts any key, so `budget["rail"] = 900` — the line is called
+    "railway" — appropriated nothing, reported nothing, and read as a strategy that
+    simply did not work. It cost several measurements before anyone noticed the
+    railway was never being built. Money assigned to nothing is always a mistake.
+    """
+
+    def __setitem__(self, key, value):
+        if key not in self:
+            raise KeyError(
+                f"no budget line {key!r}; the lines are {sorted(self)}")
+        dict.__setitem__(self, key, value)
+
+
 @dataclass
 class Crisis:
     key: str
@@ -594,7 +610,7 @@ class Game:
         self.settlement = build_settlement()
         self.holder = {h.key: h for h in self.settlement}
 
-        self.budget: dict[str, float] = {l.key: 0.0 for l in LINES}
+        self.budget: dict[str, float] = Budget({l.key: 0.0 for l in LINES})
         self.tax: dict[str, float] = {"excise": 0.45, "land": 0.0, "income": 0.0}
         self.log: list[str] = []
         self.pending: list[str] = []

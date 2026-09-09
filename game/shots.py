@@ -143,6 +143,33 @@ def main():
     advance(ui, 3)
     shot(ui, outdir, "03-map-year-4")
 
+    # The railway is the most expensive thing the player can fund and the only part
+    # of the network they build, so photograph a map that actually has one. Without
+    # this frame the gold path is never rendered and never layout-checked.
+    railed = UI.__new__(UI)
+    railed.__dict__.update(ui.__dict__)
+    railed.g = Game(3)
+    railed.g.collect()
+    for _ in range(14):
+        if railed.g.game_over:
+            break
+        if railed.g.crisis:
+            railed.g.choose(railed.g.crisis.choices[0].key)
+            continue
+        t = railed.g.treasury
+        for k in railed.g.budget:
+            railed.g.budget[k] = 0.0
+        railed.g.budget["railway"] = t * 0.75
+        railed.g.budget["army"] = t * 0.25
+        railed.g.end_turn(); railed.g.notice = []
+        if not railed.g.game_over:
+            railed.g.collect()
+    railed.g.notice = []          # a modal would cover the thing being photographed
+    railed.g.crisis = None
+    n = sum(1 for p in railed.g.provs if p.railed)
+    shot(railed, outdir, "03b-map-railed")
+    print(f"       ({n} of {len(railed.g.provs)} provinces railed)")
+
     ui.detail = ui.g.provs[0].key
     shot(ui, outdir, "04-province-detail")
     clear(ui)
