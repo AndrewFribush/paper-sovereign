@@ -16,6 +16,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
 from game.main import UI, PARCH, LINES
+from game.sim import Game
 
 
 # Every layout bug found tonight was the same bug: text drawn past the bottom of
@@ -103,6 +104,28 @@ def advance(ui, n=1):
             ui.g.collect()
 
 
+
+def _force_crisis(g, kind: str) -> bool:
+    """Drive the sim to the point where one named crisis fires, then let the sim
+    construct it. Nothing about the Crisis object or the panel is faked."""
+    import statistics
+    for _ in range(30):
+        g.crisis = None
+        g.crisis_cool = 0
+        if kind == "dearth":
+            for p in g.provs:
+                p.stocks["grain"] *= 0.35
+        elif kind == "cholera":
+            g.year += 1
+        else:
+            for p in g.provs:
+                p.unrest = min(1.0, p.unrest + 0.20)
+        g._crisis(g.year)
+        if g.crisis and g.crisis.key == kind:
+            return True
+    return False
+
+
 def main():
     outdir = sys.argv[1] if len(sys.argv) > 1 else "shots"
     os.makedirs(outdir, exist_ok=True)
@@ -149,8 +172,34 @@ def main():
         if not ui.g.game_over:
             ui.g.collect()
 
-    if not got_crisis: print("  (no crisis fired in this run — no shot)")
-    if not got_notice: print("  (no notice fired in this run — no shot)")
+    # A panel that does not render is a panel that has never been layout-checked, and
+    # the crisis modal is the game's most interruptive screen. If one did not fire
+    # naturally, drive the simulation into each crisis directly and photograph it.
+    # This renders the real panel with the real Crisis object; only the trigger is
+    # forced, so what is being checked is still the shipping layout.
+    if not got_crisis:
+        for kind in ("dearth", "cholera", "sedition"):
+            probe = UI.__new__(UI)
+            probe.__dict__.update(ui.__dict__)
+            probe.g = Game(11)
+            probe.g.collect()
+            for _ in range(4):
+                probe.g.end_turn(); probe.g.notice = []
+                if not probe.g.game_over: probe.g.collect()
+            probe.g.crisis = None
+            probe.g.crisis_cool = 0
+            probe.g.turn = max(probe.g.turn, 4)
+            forced = _force_crisis(probe.g, kind)
+            if forced:
+                shot(probe, outdir, f"09-crisis-{kind}")
+                got_crisis = True
+    if not got_notice:
+        probe = UI.__new__(UI)
+        probe.__dict__.update(ui.__dict__)
+        probe.g = Game(5); probe.g.collect()
+        probe.g.notice = ["The commission reports. The mortality was worse than believed.",
+                          "It also leaves you a register of the dead — which is a register."]
+        shot(probe, outdir, "10-notice")
 
     while not ui.g.game_over:
         advance(ui)

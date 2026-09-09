@@ -285,7 +285,7 @@ class UI:
             self.t(ch.hint, r.x + 44, r.y + 26, self.f_sm, STALE)
             self.crisis_btn[ch.key] = r
             y += 52
-        self.t("Press 1-4, or click.", x, box.bottom - 34, self.f_sm, STALE)
+        self.t(f"Press 1-{len(c.choices)}, or click.", x, box.bottom - 34, self.f_sm, STALE)
 
     def draw_brief(self):
         self.screen.fill(PARCH)
