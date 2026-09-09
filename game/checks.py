@@ -123,7 +123,19 @@ def links_and_scarcity():
     vals = {k: [] for k in LINKS}
     treas, revs, money_binds, total_binds = [], [], 0, 0
     binds_by = Counter()
+    # Several budget mixes, not one. A link that saturates only under census-heavy
+    # play is invisible to a census-poor sample, and that is exactly what happened:
+    # the legibility-saturation mutation stopped being caught the moment the register
+    # stopped being inflated by army spending, because the one mix this loop used
+    # never pushed the register high enough to reach the cap. A saturation check that
+    # tests one playstyle is testing one playstyle.
+    MIXES = [
+        dict(census=.16, army=.26, railway=.13, granary=.13, normal=.13, schools=.10, land=.09),
+        dict(census=.55, army=.25, railway=.05, granary=.05, normal=.05, schools=.05, land=.00),
+        dict(census=.05, army=.15, railway=.30, granary=.10, normal=.15, schools=.20, land=.05),
+    ]
     for seed in SEEDS:
+        mix = MIXES[seed % len(MIXES)]
         g = Game(seed)
         g.collect()
         while not g.game_over:
@@ -142,8 +154,7 @@ def links_and_scarcity():
                         vals[k].append(g.link_value(l.key, k))
                         break
             t = g.treasury
-            for kk, v in dict(census=.16, army=.26, railway=.13, granary=.13,
-                              normal=.13, schools=.10, land=.09).items():
+            for kk, v in mix.items():
                 g.budget[kk] = t * v
             g.end_turn()
             g.notice = []
@@ -153,14 +164,18 @@ def links_and_scarcity():
             revs.append(g.revenue())
 
     # Threshold set from the regression, not by feel. Reintroducing the legibility bug
-    # gives median 0.89 with 46% of line-years above 0.90; fixed it is 0.42 and 0%.
-    # Measuring "strictly at the 1.0 cap" caught only 13% and let the bug through.
+    # gives 30% of line-years above 0.90 across the three mixes; fixed, NO link exceeds
+    # 0.90 at all. Measuring "strictly at the 1.0 cap" caught only 13% and let the bug
+    # through. The threshold was 0.30 while the agents link sat at 24% on its own — a
+    # six-point window between healthy and broken, which is not a test. Recalibrating
+    # agents against focused-play peaks took the baseline to 0% and the window to
+    # thirty points, so this can now be tightened to where it discriminates.
     worst, rate = None, 0.0
     for k in LINKS:
         r = sum(1 for v in vals[k] if v > 0.90) / max(1, len(vals[k]))
         if r > rate:
             worst, rate = k, r
-    check("no link spends most of a run near its cap", rate < 0.30,
+    check("no link spends most of a run near its cap", rate < 0.10,
           f"worst is {worst} at {rate*100:.0f}% of line-years above 0.90")
     # A high median alone is not the failure — substrate sits near 0.86 and still binds
     # 15% of the time, so it is doing its job. The failure is high AND never binding:
@@ -350,12 +365,28 @@ def mechanism():
         return abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())
     es = st.mean(err(play(s, seeing)[0]) for s in SEEDS)
     eb = st.mean(err(play(s, blind)[0]) for s in SEEDS)
-    # Threshold from measurement: with the census correction disabled the ratio is
-    # 0.40, because vital registration is a SECOND path to belief correction and a
-    # census-heavy state unlocks it anyway. At 0.60 the check could not tell the two
-    # apart. Working code sits at 0.26.
-    check("funding the census sharpens the state's belief", es < eb * 0.34,
+    # Threshold from measurement, re-derived after the muster ceiling and the census
+    # rate changed the absolute numbers. Vital registration is a SECOND path to belief
+    # correction and a census-heavy state unlocks it anyway, so killing the census
+    # path only moves the ratio from 0.226 to 0.304 — the gap is narrow and the
+    # threshold has to sit inside it or the check cannot see the bug it exists for.
+    # The old 0.34 sat above BOTH and passed while the census corrected nothing.
+    check("funding the census sharpens the state's belief", es < eb * 0.27,
           f"{es*100:.1f}% vs {eb*100:.1f}% error (ratio {es/max(1e-6,eb):.2f})")
+
+    # No instrument may beat the dedicated instrument on the dedicated instrument's
+    # own axis. The army pays a muster roll into the register, which is historically
+    # right — but it paid MORE than the census did (0.030 against 0.022), and because
+    # the army is gated on legibility while feeding it, the two compounded. An
+    # army-only run reached 96% register against an all-in census run's 79-88%: the
+    # cheapest way to see your own country was to fund soldiers and ignore the census.
+    # That inverts the pillar the whole game rests on, and every mechanism check
+    # passed while it was true, because each one only ever looked at one instrument.
+    reg_census = st.mean(play(s, dict(census=.75, army=.25))[0].register_quality
+                         for s in SEEDS[:6])
+    reg_army = st.mean(play(s, dict(army=1.0))[0].register_quality for s in SEEDS[:6])
+    check("the census sees further than the muster roll", reg_army < reg_census * 0.75,
+          f"army-only {reg_army*100:.0f}% vs census {reg_census*100:.0f}%")
 
     # Overriding the church must destroy the STOCK you were standing on, not merely
     # remove future help — and the sequencing rule (build the registry first, then

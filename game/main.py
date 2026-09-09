@@ -490,8 +490,10 @@ class UI:
 
             blocks = ", ".join(LINE_BY_KEY[k].name for k in h.domain)
             self.t(f"Blocks:   {blocks}", x + 14, y + 40, self.f_sm, INK)
-            sup = ", ".join(LINK_NAMES[k].lower() for k, v in h.supplies.items() if v > 0)
-            self.t(f"Supplies: {sup or 'nothing'}", x + 14, y + 58, self.f_sm,
+            # From the sim, not recomputed here: a holder can be a stock you stand on
+            # without supplying any of the eight links, and reading h.supplies alone
+            # told the player that overriding the Estates was free.
+            self.t(f"You stand on: {g.stands_on(h.key)}", x + 14, y + 58, self.f_sm,
                    STALE if h.overridden else GREEN)
             self.t(f"Wants:    {h.price}", x + 14, y + 76, self.f_sm, STALE)
 
@@ -619,7 +621,8 @@ class UI:
         rows = [("Literacy", f"{g.mean_literacy()*100:.1f}%"),
                 ("Welfare of your people", f"{g.mean_welfare()*100:.0f}%"),
                 ("Treasury", f"£{g.treasury:,.0f}"),
-                ("Provinces held", f"{8 - len(g.lost_provinces)} of 8"),
+                ("Provinces held",
+                 f"{len(g.provs) - len(g.lost_provinces)} of {len(g.provs)}"),
                 ("Sovereign credit", f"{g.credit:.2f}"),
                 ("Register", f"{g.register_quality*100:.0f}%")]
         y = 124
@@ -654,22 +657,36 @@ class UI:
         self.rule(60, 400, W - 120)
         self.t("WHAT YOU NEVER FOUND OUT", 60, 414, self.f_sm, STALE)
         self.t("what the register said, and what was there", 340, 414, self.f_sm, TRUTH)
-        y = 438
-        for name, note, truth, err in g.epitaph():
+        # The closing two lines are the point of the screen, so they get their
+        # space first and the list is laid out into whatever is left. At eight
+        # provinces one column fit; at fourteen it did not, and the payoff line
+        # was drawn below the bottom of the window where nobody ever saw it.
+        rows = g.epitaph()
+        top, floor_y = 438, H - 118
+        avail = floor_y - top
+        cols = 1 if len(rows) * 24 <= avail else 2
+        per = (len(rows) + cols - 1) // cols
+        rh = min(24, max(16, avail // max(1, per)))
+        # a two-column epitaph has to fit twice in the same width
+        cw = (W - 120) // cols
+        dx_note, dx_truth, dx_err = (160, 410, 640) if cols == 1 else (130, 330, 500)
+
+        for i, (name, note, truth, err) in enumerate(rows):
+            cx = 60 + (i // per) * cw
+            y = top + (i % per) * rh
             col = TRUTH if (err is not None and err != 0 and (err == 9.99 or err > 0.15)) else INK
-            self.t(name, 60, y, self.f, KNOWN)
-            self.t(note, 220, y + 2, self.f_sm, BELIEVED)
-            self.t(truth, 470, y + 2, self.f_sm, col)
+            self.t(name, cx, y, self.f, KNOWN)
+            self.t(note, cx + dx_note, y + 2, self.f_sm, BELIEVED)
+            self.t(truth, cx + dx_truth, y + 2, self.f_sm, col)
             if isinstance(err, float) and err < 9 and err > 0.001:
-                self.t(f"{err*100:.0f}% out", 700, y + 2, self.f_sm,
+                self.t(f"{err*100:.0f}% out", cx + dx_err, y + 2, self.f_sm,
                        TRUTH if err > 0.15 else STALE)
-            y += 24
 
         e = abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())
         self.t(f"You governed {g.true_pop()*1000:,.0f} people believing there were "
-               f"{g.believed_pop()*1000:,.0f}.", 60, y + 16, self.f_h2, TRUTH)
-        self.t(f"After twenty years and everything you spent, you were still {e*100:.1f}% out.",
-               60, y + 46, self.f, INK)
+               f"{g.believed_pop()*1000:,.0f}.", 60, H - 104, self.f_h2, TRUTH)
+        self.t(f"After {N_TURNS} years and everything you spent, you were still "
+               f"{e*100:.1f}% out.", 60, H - 72, self.f, INK)
         self.t("ESC to quit", 60, H - 34, self.f_sm, STALE)
 
     # -- input ------------------------------------------------------------

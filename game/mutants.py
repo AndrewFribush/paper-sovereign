@@ -97,6 +97,21 @@ def main():
         print("A mutation run is already in progress (.mutants.lock). Refusing to start.")
         sys.exit(2)
     open(LOCK, "w").write(str(os.getpid()))
+    # The runner rewrites sim.py, but it also READS the harness. Editing checks.py
+    # mid-run means mutation #3 was judged by a different suite than mutation #9, and
+    # the report is a blend of two experiments that looks exactly like a real result.
+    # That happened once. Hash what the suite is made of, and refuse to report if it
+    # moved underneath us.
+    import hashlib
+    HARNESS = ["game/checks.py", "game/deadcontent.py", "game/adversarial.py"]
+    def harness_hash():
+        h = hashlib.sha256()
+        for f in HARNESS:
+            if os.path.exists(f):
+                h.update(open(f, "rb").read())
+        return h.hexdigest()
+    started_with = harness_hash()
+
     backup = tempfile.mktemp(suffix=".py")
     shutil.copy(SIM, backup)
     src = open(SIM).read()
@@ -108,7 +123,11 @@ def main():
                 print(f"  SKIP    {name}   (anchor no longer present — mutation is stale)")
                 missed.append(name + " [stale]")
                 continue
-            open(SIM, "w").write(src.replace(old, new, 1))
+            # Stamp the file so it identifies itself as mutated. A comment is
+            # inert to Python but visible to the pre-commit hook and to anyone
+            # who opens the file mid-run. fd3212d was committed without one.
+            stamp = f"# MUTANT: {name} — mutation run in progress, do not commit\n"
+            open(SIM, "w").write(stamp + src.replace(old, new, 1))
             caught, why = run_suite()
             if caught:
                 print(f"  caught  {name}")
@@ -122,6 +141,14 @@ def main():
         os.unlink(backup)
         if os.path.exists(LOCK):
             os.unlink(LOCK)
+
+    if harness_hash() != started_with:
+        print()
+        print("  ABORTED: the harness changed while this run was in progress.")
+        print("  Mutations were judged against different versions of the suite, so the")
+        print("  result above is a blend of two experiments. Re-run without editing")
+        print("  game/checks.py, game/deadcontent.py or game/adversarial.py.")
+        sys.exit(3)
 
     print()
     real = [m for m in missed if "expected miss" not in m]

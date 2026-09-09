@@ -31,6 +31,7 @@ def play(style: str, mix: dict, seed: int):
     g.collect()
     peak = Counter()
     binds = Counter()
+    per_line_binds = Counter()
     crises = Counter()
     logs = Counter()
     reached = {l.key: 0.0 for l in LINES}
@@ -49,6 +50,7 @@ def play(style: str, mix: dict, seed: int):
         for l in LINES:
             b, v = g.preview(l.key)
             binds[b] += 1
+            per_line_binds[(l.key, b)] += 1
             reached[l.key] = max(reached[l.key], v)
         t = g.treasury
         for k, v in mix.items():
@@ -67,7 +69,7 @@ def play(style: str, mix: dict, seed: int):
             if k in prev and abs(v - prev[k]) < 1e-4:
                 stuck[k] = stuck.get(k, 0) + 1
         prev = now
-    return dict(peak=peak, binds=binds, crises=crises, logs=logs,
+    return dict(peak=peak, binds=binds, per_line_binds=per_line_binds, crises=crises, logs=logs,
                 reached=reached, stuck=stuck, unlocked=set(g.unlocked),
                 lost=len(g.lost_provinces),
                 overridden=any(h.overridden for h in g.settlement))
@@ -76,6 +78,7 @@ def play(style: str, mix: dict, seed: int):
 def main():
     seeds = range(1, 9)
     all_unlocked, all_crises, all_binds = set(), Counter(), Counter()
+    all_line_binds = Counter()
     reached_any = {l.key: 0.0 for l in LINES}
     peak_any = Counter()
     log_freq = Counter()
@@ -87,6 +90,7 @@ def main():
             all_unlocked |= r["unlocked"]
             all_crises += r["crises"]
             all_binds += r["binds"]
+            all_line_binds += r["per_line_binds"]
             log_freq += r["logs"]
             for k, v in r["reached"].items():
                 reached_any[k] = max(reached_any[k], v)
@@ -102,10 +106,25 @@ def main():
 
     print("\nUNREACHABLE  (nothing here should be permanently out of the player's grasp)")
     bad = False
+    # Two different things were being reported as one. A line the player cannot use is
+    # dead content. A line the player CAN use, which runs into a link and stays there,
+    # is the game — that is what a conversion chain is. Schools tops out at 53.5%
+    # because substrate binds it (there is no commercial press to receive the schooling),
+    # and it is simultaneously the most effective instrument in the game on its own
+    # axis: it moves literacy from 20.9% to 35.0%, the largest swing any line produces.
+    # Calling that dead content would have had us "fix" the design's central claim.
+    #
+    # Dead means unusable: it never reaches a third of throughput anywhere. Constrained
+    # is reported separately, with what holds it, because it is information rather than
+    # a fault.
+    constrained = []
     for l in LINES:
-        if reached_any[l.key] < 0.6:
-            print(f"  DEAD   {l.name}: never exceeds {reached_any[l.key]*100:.0f}% throughput in any style")
+        r = reached_any[l.key]
+        if r < 0.35:
+            print(f"  DEAD   {l.name}: never exceeds {r*100:.0f}% throughput in any style")
             bad = True
+        elif r < 0.6:
+            constrained.append((l, r))
     for k in ("clerks", "masters", "engineers", "register"):
         if peak_any[k] < 0.35:
             print(f"  DEAD   institution '{k}' never exceeds {peak_any[k]:.2f}")
@@ -123,6 +142,16 @@ def main():
             print(f"  UNUSED link '{k}' never binds anything")
     if not bad:
         print("  nothing unreachable")
+    if constrained:
+        print("\n  CONSTRAINED  (usable, and permanently held below full throughput)")
+        for l, r in constrained:
+            # per LINE, not globally: the most common bind across the whole game is
+            # not necessarily what holds this one, and reporting it that way named
+            # the wrong link.
+            mine = [(k, n) for (lk, k), n in all_line_binds.items()
+                    if lk == l.key and k != "money"]
+            held = max(mine, key=lambda x: x[1])[0] if mine else "?" 
+            print(f"    {l.name}: peaks at {r*100:.0f}%, held by {held}")
 
     print("\nWALLPAPER  (a message the player stops reading is worse than none)")
     total_years = len(STYLES) * len(list(seeds)) * 20

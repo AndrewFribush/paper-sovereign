@@ -33,6 +33,9 @@ START_YEAR = 1650
 # the market over-integrates (median grain spread 1.5x, flat in 16% of years); at 6.0
 # it saturates. Below this, distance stops mattering and the player has no spread to
 # read; above it, nothing changes.
+# How far a muster roll alone can carry the register. Past this the state
+# knows its soldiers and nothing else, and only a civil census helps.
+MUSTER_CEILING = 0.45
 FREIGHT_MULT = 6.0
 
 GRAIN_CARRY = 0.88
@@ -670,10 +673,27 @@ class Game:
             # 0.15 + clerks*1.5 against clerks that peak at 0.83, so it pinned to 1.0
             # the moment the clerks existed and stopped being a constraint — the same
             # failure as legibility, in a link nobody had looked at.
-            if line_key == "census":  return min(1.0, 0.10 + self.clerks * 0.90)
-            if line_key in ("railway", "land"): return min(1.0, 0.08 + self.engineers * 1.60)
-            if line_key in ("schools",): return min(1.0, 0.05 + self.masters * 1.25)
-            if line_key == "normal":  return min(1.0, 0.26 + self.masters * 0.80)
+            # Re-derived against peaks measured under FOCUSED play, not under one
+            # balanced mix. The old numbers came from clerks peaking at 0.83 and
+            # masters at ~0.6, which is what a spread budget reaches. Pour everything
+            # into one instrument and clerks reach 0.97, masters 0.985 — so census
+            # pinned at 1.0 and both teaching lines pinned above it, and the link
+            # stopped constraining exactly the player who had specialised into it.
+            # Each now lands at 0.85 when its institution is maximally built.
+            # Concave, not linear. A linear curve forces a choice between pinning at
+            # 1.0 for the specialist who maxes the institution and throttling the
+            # generalist who half-builds it: calibrated for one, it fails the other.
+            # Both failures were live — census pinned at 1.0 under census-heavy play,
+            # and re-calibrating it flat throttled schools far enough to starve the
+            # press that schools depend on, which fed back into schools again.
+            # x**0.45 gives fast early returns and a flat top: each lands at ~0.85
+            # when its institution is maximally built and still near 0.69 at 0.6.
+            def agents_of(x: float, base: float, span: float) -> float:
+                return min(1.0, base + span * max(0.0, x) ** 0.45)
+            if line_key == "census":  return agents_of(self.clerks, 0.10, 0.75)
+            if line_key in ("railway", "land"): return agents_of(self.engineers, 0.08, 1.09)
+            if line_key in ("schools",): return agents_of(self.masters, 0.05, 0.80)
+            if line_key == "normal":  return agents_of(self.masters, 0.26, 0.59)
             return 1.0
         if link == "reach":
             # How much of your country you can actually get to, weighted by where the
@@ -773,6 +793,27 @@ class Game:
         h.consent = min(1.0, h.consent + 0.16)
         h.price_cost *= 1.35          # they learn what you will pay
         self.pending.append(f"You buy {h.name}: {h.concession}.")
+
+    # What each holder is, beyond the links they supply. The panel used to read this
+    # off h.supplies alone, so the Estates — who supply no LINK at all — displayed
+    # "Supplies: nothing", which told the player that overriding them was free. It is
+    # not: it costs 38% of your sovereign credit. A holder can be a stock you stand on
+    # without that stock being one of the eight links, and the player has to be able to
+    # see it before deciding. One source of truth, used by the panel and by override().
+    STANDS_ON = {
+        "clergy": "the parish registers, which are your census and your muster roll",
+        "nobles": "the county carting and the local courts",
+        "estates": "your credit with the people who lend to you",
+    }
+
+    def stands_on(self, key: str) -> str:
+        """What breaking with this holder destroys, in the player's words."""
+        h = self.holder[key]
+        links = ", ".join(LINK_NAMES[k].lower() for k in h.supplies if h.supplies[k] > 0)
+        extra = self.STANDS_ON.get(h.key, "")
+        if links and extra:
+            return f"{links}; and {extra}"
+        return links or extra or "nothing you can name"
 
     def override(self, key: str):
         """You win the political fight and lose the ability to execute what you won."""
@@ -901,13 +942,66 @@ class Game:
         self.year += 1
         if self.turn >= N_TURNS:
             self.game_over = True
-            self.ending = "The century turns. You hand on what you built."
+            self.ending = self._ending()
+
+    def _ending(self) -> str:
+        """Name what this run was, without ranking it.
+
+        No score: a single number would encode a politics (design §16). So the
+        ending states the run's dominant *fact* — what happened, in the terms the
+        run itself made salient — and different facts are not comparable to each
+        other. A country you could see and a country you kept are two different
+        achievements, and the game does not say which is better.
+
+        Losing a province or two is the ordinary price of not funding the army,
+        which is a legitimate strategy and not the defining fact of a reign. Only
+        losing most of the country is. Measured: all-in on army holds 14 of 14;
+        no army at all loses exactly 2. So the headline comes from what you built,
+        and territory is a clause appended to it.
+        """
+        lost = len(self.lost_provinces)
+        n = max(1, len(self.provs))
+        overrode = [h for h in self.settlement if h.overridden]
+
+        if lost >= n * 0.35:
+            return "Most of it is not yours any more. What is left, you hold."
+
+        if overrode and self.register_quality < 0.25:
+            head = ("You broke what stood in your way and found nothing behind it. "
+                    "The country is quiet and unread.")
+        elif overrode:
+            head = "Nobody obstructs you now. You built the apparatus to replace them."
+        elif self.register_quality >= 0.55:
+            head = "You can see your own country. Your successors inherit the file."
+        # Measured across the strategy space: literacy runs 20.9% with no schooling
+        # at all to 28.2% for an all-in schools run over twenty years — schools have
+        # a forty-year fuse and this is a twenty-year game. 0.26 is the line that
+        # actually separates 'you funded schools' from 'you did not'. A guessed 0.35
+        # was above the reachable maximum and made this ending dead content.
+        elif self.mean_literacy() >= 0.26:
+            head = "They can read. Whatever they do with that is not yours to decide."
+        elif self.mean_welfare() >= 0.72:
+            head = "They are fed and housed. The state that did it remains a rumour to them."
+        else:
+            head = f"{N_TURNS} years. Nothing broke, and nothing much moved."
+
+        if lost == 1:
+            head += " One county went to the neighbour."
+        elif lost:
+            head += f" {lost} counties went to the neighbour."
+        return head
 
     def _apply(self, key: str, through: float):
         if key == "census":
             self.clerks = min(1.0, self.clerks + through * 0.05)
             # legibility is one apparatus: counting people is what makes a muster roll possible
-            self.register_quality = min(1.0, self.register_quality + through * 0.022)
+            # Swept after the muster ceiling went in, because the army had been
+            # inflating legibility and every instrument was drawing on it. There is
+            # a cliff between 0.022 and 0.028 (belief-error ratio 0.48 -> 0.24): below
+            # it the census never gets over the decay and the pillar is decorative.
+            # 0.034 sits mid-plateau rather than on the edge, and leaves the register
+            # at ~67% on an all-in census run — high, not saturated.
+            self.register_quality = min(1.0, self.register_quality + through * 0.034)
             # a census is a snapshot, and it only reaches where reach allows
             for p in self.provs:
                 if p.key in self.lost_provinces:
@@ -996,7 +1090,18 @@ class Game:
             live = [p for p in self.provs if p.key not in self.lost_provinces]
             for p in sorted(live, key=lambda q: q.freight())[:3]:
                 p.stocks["munit"] += buy / 3.0
-            self.register_quality = min(1.0, self.register_quality + through * 0.03)
+            # A muster roll is a register — historically the first one most states had.
+            # But it is a NARROW register: men of fighting age, in places you already
+            # reach. Two bugs lived here. It paid 0.03 against the census's 0.022, so
+            # the instrument whose purpose is elsewhere out-registered the dedicated
+            # one; and because the army is *gated on* legibility while *feeding* it,
+            # the two compounded into a self-gating loop — army-only runs reached 96%
+            # register against all-in census's 79-88%, inverting the game's thesis.
+            # The ceiling is the fix that matters: a muster roll can only tell you so
+            # much about a country, and past that you need an actual civil census.
+            self.register_quality = min(MUSTER_CEILING,
+                                        self.register_quality + through * 0.010) \
+                if self.register_quality < MUSTER_CEILING else self.register_quality
 
     def _economy(self, y: int):
         # climate: a slow global multiplier with excursions (main doc §20)
