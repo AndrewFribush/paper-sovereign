@@ -16,6 +16,7 @@ The thesis being tested (main doc §21):
 
 from __future__ import annotations
 import json, os, random
+from statistics import mean as st_mean
 from dataclasses import dataclass, field
 
 RED_FLAG = 9.99
@@ -362,6 +363,32 @@ CATEGORIES = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Crises — main doc §5. "Blindness costs nothing in ordinary years. Then there is a
+# famine, a cholera epidemic, a mobilization, or 1848, and the state needs to know
+# within weeks... and the apparatus takes a decade to build."
+#
+# This is the answer to measured late-game convergence: every other instrument is a
+# slow stock, so once built the ordering never changes. A crisis is a SHORT FUSE that
+# late capacity can answer and early capacity cannot — and surviving one ratchets the
+# state upward, so the century's capacity growth is paid for in disasters.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Choice:
+    key: str
+    label: str
+    hint: str
+
+
+@dataclass
+class Crisis:
+    key: str
+    title: str
+    lines: list
+    choices: list
+
+
 @dataclass
 class ChainResult:
     line: str
@@ -413,6 +440,10 @@ class Game:
         self.taught = False
         self.notice: list = []   # a thing the player must actually be made to read
         self.unlocked: set = set()
+        self.crisis = None
+        self.price_fixed_until = -1
+        self.crises_survived = 0
+        self.crisis_cool = 0
         self.game_over = False
         self.ending = ""
 
@@ -591,6 +622,7 @@ class Game:
         self._reports(y)
         self._early_lesson(y)
         self._categories(y)
+        self._crisis(y)
         self._tilly(y)
 
         # 3. decay
@@ -730,6 +762,8 @@ class Game:
         """Channels with different latencies and biases. Never reconciled."""
         for p in self.provs:
             # prices: honest, but only where there is trade and reach
+            if self.year <= self.price_fixed_until:
+                continue          # an administered price carries no information
             visible = p.bourgeoisie > 0.15 or "returns" in self.unlocked
             if visible and self.rng.random() < 0.9 - p.freight() * 0.2:
                 for g in GOOD_KEYS:
@@ -791,6 +825,141 @@ class Game:
                 self.notice = list(c.reveal)
                 return
 
+    # -- crises -----------------------------------------------------------
+    def _crisis(self, y: int):
+        if self.crisis or self.notice or self.turn < 3 or self.turn < self.crisis_cool:
+            return
+        self.crisis_cool = self.turn + 3
+        urban = sum(p.pop * p.bourgeoisie for p in self.provs) / max(1e-6, self.true_pop())
+        dearth = (st_mean([price_of(p, "grain") for p in self.provs]) > GOODS["grain"].ref_price * 3.4
+                  and self.mean_welfare() < 0.86)
+        unrest = st_mean([p.unrest for p in self.provs])
+
+        if dearth and self.rng.random() < 0.60:
+            self.crisis = Crisis("dearth", "THE PRICE OF BREAD", [
+                "Grain has run away from wages in most of the country.",
+                "The magistrates write daily. The assize is being ignored.",
+                "",
+                "You have to decide what a government is for."],
+                [Choice("reserve", "Open the reserve everywhere",
+                        f"{self.reserve_grain:,.0f} qr in hand. Reach decides what arrives."),
+                 Choice("buy", "Buy abroad on credit",
+                        f"£{200 * (2.0 - self.credit):,.0f}, and it lands late."),
+                 Choice("fix", "Fix the price of bread by proclamation",
+                        "Instant relief. You will not see a price for three years."),
+                 Choice("none", "Let it run", "The market clears. Some of them will not.")])
+            return
+
+        if y >= 1654 and urban > 0.38 and self.rng.random() < 0.22:
+            self.crisis = Crisis("cholera", "A SICKNESS IN THE PORTS", [
+                "It came up the river with the coasting trade and it is in the towns.",
+                "Nobody can tell you how many are dying, because nobody counts the dead.",
+                "",
+                "You are being asked to act on a number you do not have."],
+                [Choice("quarantine", "Quarantine the ports",
+                        "Halts the contagion where reach allows. Trade stops with it."),
+                 Choice("commission", "A sanitary commission",
+                        "£120 and clerks you may not have. It will also start counting."),
+                 Choice("none", "Trust to the season", "It has passed before.")])
+            return
+
+        if self.mean_literacy() > 0.20 and unrest > 0.16 and self.rng.random() < 0.28:
+            self.crisis = Crisis("sedition", "THE PRESS AND THE MEETINGS", [
+                "The reading rooms have become something else. There are petitions,",
+                "and the petitions have printers, and the printers have subscribers.",
+                "",
+                "Your schoolmasters taught them to read. You paid for it."],
+                [Choice("concede", "Concede, and be seen to concede",
+                        "Unrest falls. Someone in the settlement gains a permanent hold."),
+                 Choice("suppress", "Suppress the press and the associations",
+                        "Needs an army. Costs consent, and you go blinder."),
+                 Choice("none", "Do nothing and hope it passes", "It sometimes does.")])
+            return
+
+    def choose(self, key: str):
+        """Resolve the standing crisis. Capacity decides whether the option works."""
+        c = self.crisis
+        if not c:
+            return
+        self.crisis = None
+        out = []
+        if key == "reserve":
+            sent = self.reserve_grain
+            arrived = 0.0
+            for p in self.provs:
+                if p.key in self.lost_provinces: continue
+                give = sent / max(1, len(self.provs))
+                a = give * max(0.25, 1.0 - p.freight() * 0.22)
+                p.stocks["grain"] += a; p.unrest = max(0.0, p.unrest - 0.35); arrived += a
+            self.reserve_grain = 0.0
+            out = [f"{sent:,.0f} qr sent, {arrived:,.0f} arrived. Reach decided the rest."]
+            if sent < 20: out.append("It was not enough. It was never going to be.")
+        elif key == "buy":
+            cost = 200 * (2.0 - self.credit)
+            if self.treasury >= cost:
+                self.treasury -= cost
+                for p in self.provs:
+                    if p.key not in self.lost_provinces:
+                        p.stocks["grain"] += p.consumption("grain") * 0.35
+                        p.unrest = max(0.0, p.unrest - 0.30)
+                out = [f"£{cost:,.0f} spent. The grain lands late, and it lands."]
+            else:
+                self.credit *= 0.80
+                out = ["You could not raise it. The refusal is now public,",
+                       "and it will price into everything you borrow after this."]
+        elif key == "fix":
+            self.price_fixed_until = self.year + 3
+            for p in self.provs:
+                p.unrest = max(0.0, p.unrest - 0.45)
+            out = ["The proclamation is obeyed, and the riots stop.",
+                   "Your price returns stop with them. For three years you are",
+                   "reading a number the state set, not one the country made."]
+        elif key == "quarantine":
+            r = self.link_value("census", "reach")
+            for p in self.provs:
+                p.pop *= 1.0 - 0.030 * (1.0 - r)
+            self.treasury -= 60
+            out = [f"The cordon holds where you could reach ({r*100:.0f}%).",
+                   "Trade stops. So, mostly, does the sickness."]
+        elif key == "commission":
+            if self.treasury >= 120 and self.clerks > 0.25:
+                self.treasury -= 120
+                self.register_quality = min(1.0, self.register_quality + 0.22)
+                for p in self.provs: p.pop *= 0.985
+                self.unlocked.add("vital")
+                out = ["The commission reports. The mortality was worse than believed.",
+                       "It also leaves you a register of the dead — which is a register."]
+            else:
+                for p in self.provs: p.pop *= 0.965
+                out = ["You had neither the money nor the clerks. It ran its course."]
+        elif key == "concede":
+            h = self.rng.choice([x for x in self.settlement if not x.overridden] or self.settlement)
+            h.consent = min(1.0, h.consent + 0.20)
+            h.price_cost *= 1.5
+            for p in self.provs: p.unrest = max(0.0, p.unrest - 0.35)
+            out = [f"It is settled. {h.name} were seen to obtain it,",
+                   "and they will expect to be asked again."]
+        elif key == "suppress":
+            if self.army >= 1.4:
+                for p in self.provs: p.unrest = max(0.0, p.unrest - 0.45)
+                for h in self.settlement:
+                    if not h.overridden: h.consent = max(0.05, h.consent - 0.10)
+                self.clerks *= 0.85
+                out = ["The meetings stop. So do the reports about the meetings.",
+                       "Your picture of the country improves and the country does not."]
+            else:
+                for p in self.provs: p.unrest = min(1.0, p.unrest + 0.20)
+                out = ["You did not have the men. The attempt was noticed."]
+        else:
+            for p in self.provs: p.unrest = min(1.0, p.unrest + 0.12)
+            out = ["Nothing was done. It passed, or it did not."]
+
+        if key != "none":
+            self.crises_survived += 1
+            # the ratchet: what a crisis forces you to build, you keep
+            self.clerks = min(1.0, self.clerks + 0.05)
+        self.notice = [c.title + " — RESOLVED", ""] + out
+
     def _tilly(self, y: int):
         self.war_in -= 1
         if self.war_in == 2:
@@ -814,7 +983,8 @@ class Game:
 
     # -- save / load ------------------------------------------------------
     SCALARS = ("year turn treasury reserve_grain rail_progress clerks masters engineers "
-               "register_quality army credit threat war_in game_over ending taught admin_load").split()
+               "register_quality army credit threat war_in game_over ending taught admin_load "
+               "price_fixed_until crises_survived crisis_cool").split()
     # `unlocked` is a set, handled separately in to_dict/load
 
     def to_dict(self) -> dict:

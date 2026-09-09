@@ -54,6 +54,7 @@ class UI:
         self.politics = False
         self.ledger = False
         self.intro = True
+        self.crisis_btn: dict = {}
         self.btn: dict = {}
         self.prov_rects: dict = {}
 
@@ -254,6 +255,33 @@ class UI:
                 self.t(line, x, y, self.f, INK if line else STALE)
                 y += 24 if line else 10
         self.t("ENTER to go on", x, box.bottom - 42, self.f_sm, GOLD)
+
+    def draw_crisis(self):
+        g = self.g
+        c = g.crisis
+        s = pygame.Surface((W, H)); s.set_alpha(236); s.fill(PARCH)
+        self.screen.blit(s, (0, 0))
+        box = pygame.Rect(190, 110, 900, 580)
+        pygame.draw.rect(self.screen, PARCH_DK, box, border_radius=4)
+        pygame.draw.rect(self.screen, RED, box, 2, border_radius=4)
+        x, y = box.x + 46, box.y + 38
+        self.t(c.title, x, y, self.f_h1, KNOWN); y += 48
+        self.rule(x, y - 8, box.width - 92); y += 10
+        for line in c.lines:
+            self.t(line, x, y, self.f, INK if line else STALE)
+            y += 25 if line else 12
+        y += 16
+        self.crisis_btn = {}
+        for i, ch in enumerate(c.choices):
+            r = pygame.Rect(x, y, box.width - 92, 46)
+            pygame.draw.rect(self.screen, PARCH, r, border_radius=3)
+            pygame.draw.rect(self.screen, RULE, r, 1, border_radius=3)
+            self.t(f"{i+1}", r.x + 14, r.y + 11, self.f_h2, GOLD)
+            self.t(ch.label, r.x + 44, r.y + 6, self.f, KNOWN)
+            self.t(ch.hint, r.x + 44, r.y + 26, self.f_sm, STALE)
+            self.crisis_btn[ch.key] = r
+            y += 52
+        self.t("Press 1-4, or click.", x, box.bottom - 34, self.f_sm, STALE)
 
     def draw_brief(self):
         self.screen.fill(PARCH)
@@ -577,6 +605,11 @@ class UI:
                 if e.type == pygame.QUIT:
                     return
                 if e.type == pygame.KEYDOWN:
+                    if self.g.crisis:
+                        for i, ch in enumerate(self.g.crisis.choices):
+                            if e.key == getattr(pygame, f"K_{i+1}"):
+                                self.g.choose(ch.key); break
+                        continue
                     if self.g.notice:
                         if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                             self.g.notice = []
@@ -625,6 +658,11 @@ class UI:
                         self.g.end_turn()
                         if not self.g.game_over:
                             self.g.collect()
+                if e.type == pygame.MOUSEBUTTONDOWN and self.g.crisis:
+                    for k, r in getattr(self, "crisis_btn", {}).items():
+                        if r.collidepoint(e.pos):
+                            self.g.choose(k); break
+                    continue
                 if (e.type == pygame.MOUSEBUTTONDOWN and not self.g.game_over
                         and not self.intro and not self.g.notice):
                     mx, my = e.pos
@@ -670,7 +708,9 @@ class UI:
                 elif self.detail: self.draw_detail()
                 else: self.draw_map()
                 self.draw_budget(); self.draw_log()
-            if self.g.notice:
+            if self.g.crisis:
+                self.draw_crisis()
+            elif self.g.notice:
                 self.draw_notice()
             pygame.display.flip()
             self.clock.tick(60)
