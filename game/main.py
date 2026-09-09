@@ -339,8 +339,9 @@ class UI:
                x, y, self.f_sm, STALE)
         y += 24
 
-        cols = [("Province", 0), ("Subjects", 132), ("age", 210),
-                ("Grain", 262), ("Coal", 336), ("Iron", 402), ("Cloth", 468), ("Wage", 540)]
+        cols = ([("Province", 0), ("Subjects", 132), ("age", 210)]
+                + [(GOODS[g].name[:5], 262 + i * 60) for i, g in enumerate(GOOD_KEYS)]
+                + [("Wage", 262 + len(GOOD_KEYS) * 60)])
         for label, dx in cols:
             self.t(label, x + dx, y, self.f_sm, STALE)
         y += 16
@@ -361,7 +362,8 @@ class UI:
                 self.t(f"{a}y", x + 210, y, self.f_sm, RED if a > 25 else STALE)
             else:
                 self.t("numerous", x + 132, y, self.f_sm, STALE)
-            for gk, dx in (("grain", 262), ("coal", 336), ("iron", 402), ("cloth", 468)):
+            for gi, gk in enumerate(GOOD_KEYS):
+                dx = 262 + gi * 60
                 o = g.beliefs.get_price(p.key, gk)
                 ref = GOODS[gk].ref_price
                 if not o:
@@ -374,8 +376,8 @@ class UI:
                 if g.year - o.year > 1:
                     self.t(f"'{o.year % 100:02d}", x + dx + 40, y + 2, self.f_sm, STALE)
             wh = g.beliefs.wage_hist.get(p.key, [])
-            self.t(f"{wh[-1][1]:,.1f}" if wh else "—", x + 540, y, self.f_sm,
-                   BELIEVED if wh else STALE)
+            self.t(f"{wh[-1][1]:,.1f}" if wh else "—", x + 262 + len(GOOD_KEYS) * 60, y,
+                   self.f_sm, BELIEVED if wh else STALE)
             if self.inspector:
                 self.tr(f"{price_of(p,'grain'):,.0f}", panel.right - 14, y, self.f_sm, TRUTH)
             y += 22

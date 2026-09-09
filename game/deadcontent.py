@@ -210,7 +210,10 @@ def thresholds():
     #    never censused, so "any province is stale" is 100% by construction.
     EXEMPT_LOW = {"price: at ceiling", "price: at floor", "supply: clamped high",
                   "supply: clamped low"}
-    EXEMPT_HIGH = {"ui: belief stale (>12y)", "ui: belief ancient (>25y)"}
+    EXEMPT_HIGH = {"ui: belief stale (>12y)", "ui: belief ancient (>25y)",
+                   # at least one province has no merchant in almost every run, which
+                   # is the design working, not a gate that fails to gate
+                   "sight: province invisible"}
     bad = []
     for name in sorted(tot):
         r = 100 * hits[name] / max(1, tot[name])

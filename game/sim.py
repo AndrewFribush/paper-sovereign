@@ -75,6 +75,14 @@ GOODS = {
         Good("coal",  "Coal",   6.0, 1.0, 0.6, 0.22, 9.0, 0.90),
         Good("iron",  "Iron",  14.0, 1.1, 0.7, 0.25, 9.0, 0.94),
         Good("cloth", "Cloth", 20.0, 0.7, 0.5, 0.30, 7.0, 0.92),
+        # Pillar 3: war is a second kind of demand on the network, not a die roll.
+        # Munitions are the good that makes an army an economic object — it eats
+        # them every year and eats far more when it fights, so a war two provinces
+        # away shows up as a price in a city that never sees a soldier.
+        # A war triples demand against fixed arsenals, so the wartime price is meant to be
+        # violent — the ceiling has to be far enough out that the spike is a signal rather
+        # than a clamp. At 8.0 it pinned in 19% of province-years.
+        Good("munit", "Munitions", 26.0, 1.3, 0.8, 0.25, 22.0, 0.97),
     ]
 }
 GOOD_KEYS = list(GOODS)
@@ -102,6 +110,7 @@ class Province:
     unrest: float = 0.0
     grievance: float = 0.0   # struck stakes: commons, gleaning, customary right
     tax_burden: float = 0.0  # share of the wage the state takes here, set each tick
+    munitions_demand: float = 0.0  # what the army stationed here eats
     # who obstructs here, and how hard (0..1). politics-and-discretion.md
     clergy_strength: float = 0.0
     noble_strength: float = 0.0
@@ -130,6 +139,13 @@ class Province:
             return self.pop * 0.30 * (0.4 + self.bourgeoisie)
         if good == "iron":
             return self.pop * 0.14 * (0.3 + self.bourgeoisie)
+        if good == "munit":
+            # A standing army eats munitions every year whether or not it fights, and
+            # that upkeep is the continuous drag: it raises demand nationally, which
+            # raises the price, which is money the country spends on powder instead of
+            # bread. Spread by POPULATION, not by freight — concentrating it on the
+            # nearest province emptied the capital's magazine and pinned its price.
+            return 0.05 * self.pop + self.munitions_demand
         return 0.0
 
 
@@ -138,21 +154,21 @@ def build_world(rng: random.Random) -> list[Province]:
     P = Province
     provs = [
         P("cap",   "Aldermarch",  6, 2, 24.0, 0.34, 0.15, True,  0.85,
-          {"grain": 8.0,  "cloth": 14.0, "coal": 0.0,  "iron": 2.0}, clergy_strength=0.35, noble_strength=0.20),
+          {"grain": 8.0, "munit": 3.2,  "cloth": 14.0, "coal": 0.0,  "iron": 2.0}, clergy_strength=0.35, noble_strength=0.20),
         P("weald", "Weald",       4, 1, 14.0, 0.16, 0.55, True,  0.30,
-          {"grain": 30.0, "cloth": 1.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.55, noble_strength=0.70),
+          {"munit": 0.0, "grain": 30.0, "cloth": 1.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.55, noble_strength=0.70),
         P("hollin","Hollinghay",  8, 1, 16.0, 0.13, 0.70, False, 0.22,
-          {"grain": 32.0, "cloth": 0.5,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.60, noble_strength=0.75),
+          {"munit": 0.0, "grain": 32.0, "cloth": 0.5,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.60, noble_strength=0.75),
         P("blackm","Blackmoor",   3, 3,  9.0, 0.19, 1.10, False, 0.35,
-          {"grain": 4.0,  "cloth": 0.0,  "coal": 18.0, "iron": 1.0}, clergy_strength=0.30, noble_strength=0.45),
+          {"grain": 4.0, "munit": 2.2,  "cloth": 0.0,  "coal": 18.0, "iron": 1.0}, clergy_strength=0.30, noble_strength=0.45),
         P("ironby","Ironby",      9, 3,  8.0, 0.21, 1.25, False, 0.40,
-          {"grain": 3.5,  "cloth": 0.0,  "coal": 3.0,  "iron": 11.0}, clergy_strength=0.30, noble_strength=0.50),
+          {"grain": 3.5, "munit": 5.0,  "cloth": 0.0,  "coal": 3.0,  "iron": 11.0}, clergy_strength=0.30, noble_strength=0.50),
         P("stitch","Stitchford",  6, 4, 11.0, 0.28, 0.85, True,  0.60,
-          {"grain": 3.0,  "cloth": 16.0, "coal": 0.0,  "iron": 0.0}, clergy_strength=0.25, noble_strength=0.25),
+          {"munit": 0.0, "grain": 3.0,  "cloth": 16.0, "coal": 0.0,  "iron": 0.0}, clergy_strength=0.25, noble_strength=0.25),
         P("marsh", "Marshend",    2, 5,  7.0, 0.09, 1.40, True,  0.10,
-          {"grain": 13.0,  "cloth": 0.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.70, noble_strength=0.60),
+          {"munit": 0.0, "grain": 13.0,  "cloth": 0.0,  "coal": 0.0,  "iron": 0.0}, clergy_strength=0.70, noble_strength=0.60),
         P("far",   "Cauldfell",  10, 5,  5.0, 0.05, 2.60, False, 0.03,   # the dark province
-          {"grain": 6.0,  "cloth": 0.0,  "coal": 2.0,  "iron": 0.0}, clergy_strength=0.75, noble_strength=0.85),
+          {"munit": 0.0, "grain": 6.0,  "cloth": 0.0,  "coal": 2.0,  "iron": 0.0}, clergy_strength=0.75, noble_strength=0.85),
     ]
     # No province produced literally none of anything. There was a village smith, a
     # weaver at the cottage, someone digging the outcrop. Without a floor, a province
@@ -892,7 +908,17 @@ class Game:
                 p.grievance = min(1.0, p.grievance + share * 22.0)
             self.engineers = min(1.0, self.engineers + through * 0.012)
         elif key == "army":
-            self.army += through * 0.085
+            # An army is men AND magazines. Procurement is what lets you fight a war
+            # you could not supply out of current production — the design's stockpile
+            # against a demand shock you can see coming.
+            # Measured: at the old rate the army peaked at 1.85 against a threat that
+            # reaches 3.92, so no level of spending could hold the country and the Tilly
+            # clock was a countdown rather than a choice.
+            self.army += through * 0.38
+            buy = through * 3.2   # enough that a decade of funding is a real magazine
+            live = [p for p in self.provs if p.key not in self.lost_provinces]
+            for p in sorted(live, key=lambda q: q.freight())[:3]:
+                p.stocks["munit"] += buy / 3.0
             self.register_quality = min(1.0, self.register_quality + through * 0.03)
 
     def _economy(self, y: int):
@@ -1277,13 +1303,57 @@ class Game:
             self.clerks = min(1.0, self.clerks + 0.05)
         self.notice = [c.title + " — RESOLVED", ""] + out
 
+    def _army_upkeep(self):
+        """Standing demand from the army, spread by where the people are."""
+        live = [p for p in self.provs if p.key not in self.lost_provinces]
+        pop = sum(p.pop for p in live)
+        for p in live:
+            p.munitions_demand = self.army * 0.55 * (p.pop / max(1e-6, pop))
+
+    def _munitions(self, at_war: bool):
+        """Spread the army's demand over the provinces that can actually supply it.
+
+        The army is a province-sized consumer that produces nothing (main doc §16).
+        In peace it eats a trickle; at war it eats an order of magnitude more, and the
+        shortfall is what decides whether the line holds — not a die roll.
+        """
+        live = [p for p in self.provs if p.key not in self.lost_provinces]
+        if not live:
+            return 1.0
+        want = self.army * (2.2 if at_war else 0.8)
+        # Drawn from the national magazine, weighted toward what the army can reach.
+        # Depleting the stock is what raises the price everywhere the market reaches —
+        # so a war two provinces away shows up in a city that never sees a soldier.
+        wt = {p.key: p.stocks["munit"] / (1.0 + p.freight()) for p in live}
+        tot = sum(wt.values())
+        if tot <= 1e-9:
+            for p in live:
+                p.munitions_demand = 0.0
+            return 0.15
+        got = 0.0
+        for p in live:
+            # never strip a magazine bare: the draw is weighted toward the closest
+            # province, and emptying the capital every year pinned its price to the
+            # ceiling in 125 province-years against 20 everywhere else.
+            take = min(p.stocks["munit"] * 0.55, want * wt[p.key] / tot)
+            p.stocks["munit"] -= take
+            got += take
+        return max(0.15, min(1.0, got / max(1e-6, want)))
+
     def _tilly(self, y: int):
+        self._army_upkeep()
+        self._munitions(at_war=False)
         self.war_in -= 1
         if self.war_in == 2:
             self.log.append("The neighbour is drilling. Your envoys advise it will be two years.")
         if self.war_in <= 0:
-            need = 1.0 + self.threat * 2.4 + (y - START_YEAR) * 0.075
-            if self.army >= need:
+            need = 1.0 + self.threat * 2.0 + (y - START_YEAR) * 0.055
+            supplied = self._munitions(at_war=True)
+            effective = self.army * (0.55 + 0.45 * supplied)
+            if supplied < 0.85:
+                self.log.append(
+                    f"The magazines are at {supplied*100:.0f}%. The army fights on what it has.")
+            if effective >= need:
                 self.log.append("WAR. The line holds. The neighbour comes to terms.")
                 self.treasury += 120
                 self.holder['estates'].consent = min(1.0, self.holder['estates'].consent + 0.08)
