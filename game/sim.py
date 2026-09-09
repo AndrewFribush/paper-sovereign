@@ -101,6 +101,7 @@ class Province:
     industry: dict = field(default_factory=dict)   # capital stock per good
     unrest: float = 0.0
     grievance: float = 0.0   # struck stakes: commons, gleaning, customary right
+    tax_burden: float = 0.0  # share of the wage the state takes here, set each tick
     # who obstructs here, and how hard (0..1). politics-and-discretion.md
     clergy_strength: float = 0.0
     noble_strength: float = 0.0
@@ -238,7 +239,10 @@ def welfare(prov: Province) -> float:
         met += w * min(1.0, prov.stocks[g] / max(1e-6, need * 0.55))
     availability = met / total if total else 1.0
 
-    ratio = wage_of(prov) / max(1e-6, basket_cost(prov))
+    # what the state takes is not available to buy bread with. This is the whole
+    # guns-versus-butter trade: without it, extraction is free and every strategy
+    # feeds its people identically.
+    ratio = (wage_of(prov) * (1.0 - prov.tax_burden)) / max(1e-6, basket_cost(prov))
     affordability = 1.0 - math.exp(-1.9 * ratio)
 
     return max(0.0, min(1.0, min(availability, affordability)))
@@ -401,6 +405,41 @@ def build_settlement() -> list:
 # new instrument, and usually delivers an unpleasant surprise about the number.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The fiscal ladder — main doc §5. "Fiscal capacity is gated by information capacity,
+# and the historical sequencing falls out on its own. States taxed trade first because
+# trade was visible... A player who wants progressive taxation in 1700 should find the
+# instrument simply unavailable, not merely unpopular."
+#
+# So each tier is gated on the legibility link that already exists, and each falls on
+# a different part of the country. Extraction is the missing choice: with revenue
+# automatic, nobody can squeeze their population for state power, and the design's
+# "two visible numbers" — state power and how people live — cannot diverge.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Tax:
+    key: str
+    name: str
+    blurb: str
+    needs: float          # legibility required before the instrument exists at all
+    yield_per: float      # revenue per point of rate
+    incidence: str        # who actually pays
+
+
+TAXES = [
+    Tax("excise", "Excise and customs",
+        "Goods at the port and the mill gate. You need to see almost nothing.",
+        0.00, 138.0, "everyone, and hardest on the poor"),
+    Tax("land", "Land tax",
+        "Assessed on the cadastre. Survey once, then it stays roughly true.",
+        0.38, 170.0, "the countryside"),
+    Tax("income", "Income tax",
+        "Continuous, adversarial, and it needs a literate inspectorate.",
+        0.72, 236.0, "where the money is"),
+]
+
+
 @dataclass
 class Category:
     key: str
@@ -501,6 +540,7 @@ class Game:
         self.holder = {h.key: h for h in self.settlement}
 
         self.budget: dict[str, float] = {l.key: 0.0 for l in LINES}
+        self.tax: dict[str, float] = {"excise": 0.45, "land": 0.0, "income": 0.0}
         self.log: list[str] = []
         self.pending: list[str] = []
         self.results: list[ChainResult] = []
@@ -524,6 +564,7 @@ class Game:
         self.game_over = False
         self.ending = ""
 
+        self._apply_tax_burden()
         self._initial_survey()
 
     # -- setup ------------------------------------------------------------
@@ -701,9 +742,14 @@ class Game:
         self.pending = []
         y = self.year
 
+        # A negative treasury made this scale factor negative, which flipped the sign of
+        # every appropriation, made `spent` negative, and ADDED money on every line —
+        # compounding to -1.7e180 over twenty years. Crisis options deduct without
+        # checking affordability, so the treasury can and does go below zero.
+        self.treasury = max(0.0, self.treasury)
         appropriated = sum(self.budget.values())
         if appropriated > self.treasury:
-            scale = self.treasury / max(1e-6, appropriated)
+            scale = max(0.0, self.treasury) / max(1e-6, appropriated)
             for k in self.budget:
                 self.budget[k] *= scale
             self.log.append("The treasury would not bear it; appropriations were cut back.")
@@ -717,7 +763,7 @@ class Game:
             wanted = appro / line.unit_cost
             through = wanted * bv
             spent = through * line.unit_cost
-            self.treasury -= spent
+            self.treasury = max(0.0, self.treasury - spent)
             waste = appro - spent
             fr = ""
             if waste > appro * 0.12:
@@ -731,6 +777,7 @@ class Game:
             self.budget[k] = 0.0
 
         # 2. world tick
+        self._apply_tax_burden()
         self._reflood()
         self._economy(y)
         self._events(y)
@@ -1151,7 +1198,7 @@ class Game:
         elif key == "buy":
             cost = 200 * (2.0 - self.credit)
             if self.treasury >= cost:
-                self.treasury -= cost
+                self.treasury = max(0.0, self.treasury - cost)
                 for p in self.provs:
                     if p.key not in self.lost_provinces:
                         p.stocks["grain"] += p.consumption("grain") * 0.35
@@ -1172,12 +1219,12 @@ class Game:
             r = self.link_value("census", "reach")
             for p in self.provs:
                 p.pop *= 1.0 - 0.030 * (1.0 - r)
-            self.treasury -= 60
+            self.treasury = max(0.0, self.treasury - 60)
             out = [f"The cordon holds where you could reach ({r*100:.0f}%).",
                    "Trade stops. So, mostly, does the sickness."]
         elif key == "commission":
             if self.treasury >= 120 and self.clerks > 0.25:
-                self.treasury -= 120
+                self.treasury = max(0.0, self.treasury - 120)
                 self.register_quality = min(1.0, self.register_quality + 0.22)
                 for p in self.provs: p.pop *= 0.985
                 self.unlocked.add("vital")
@@ -1229,7 +1276,7 @@ class Game:
                 self.lost_provinces.append(lost.key)
                 self.log.append(f"WAR. The army was not enough. {lost.name} is ceded.")
                 self._reflood()
-                self.treasury = max(0, self.treasury - 150)
+                self.treasury = max(0.0, self.treasury - 150)
                 self.credit *= 0.8
                 self.holder['estates'].consent = max(0.05, self.holder['estates'].consent - 0.15)
             self.army *= 0.80
@@ -1246,10 +1293,11 @@ class Game:
         return {
             "scalars": {k: getattr(self, k) for k in self.SCALARS},
             "lost": self.lost_provinces,
+            "tax": self.tax,
             "unlocked": sorted(self.unlocked),
             "provs": [{"key": p.key, "pop": p.pop, "literacy": p.literacy,
                        "base_freight": p.base_freight, "railed": p.railed,
-                       "unrest": p.unrest, "grievance": p.grievance, "flood_cost": p.flood_cost, "stocks": p.stocks, "capacity": p.capacity,
+                       "unrest": p.unrest, "grievance": p.grievance, "tax_burden": p.tax_burden, "flood_cost": p.flood_cost, "stocks": p.stocks, "capacity": p.capacity,
                        "industry": p.industry, "bourgeoisie": p.bourgeoisie}
                       for p in self.provs],
             "settlement": [{"key": h.key, "consent": h.consent,
@@ -1280,10 +1328,11 @@ class Game:
         for k, v in d["scalars"].items():
             setattr(g, k, v)
         g.lost_provinces = d["lost"]
+        g.tax = d.get("tax", g.tax)
         g.unlocked = set(d.get("unlocked", []))
         for pd in d["provs"]:
             p = g.by_key[pd["key"]]
-            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "grievance", "flood_cost", "stocks", "capacity",
+            for k in ("pop", "literacy", "base_freight", "railed", "unrest", "grievance", "tax_burden", "flood_cost", "stocks", "capacity",
                       "industry", "bourgeoisie"):
                 setattr(p, k, pd[k])
         for hd in d["settlement"]:
@@ -1340,7 +1389,41 @@ class Game:
         return out
 
     # -- income -----------------------------------------------------------
+    def tax_available(self, key: str) -> bool:
+        """An instrument you cannot see well enough to use does not exist yet."""
+        t = next(x for x in TAXES if x.key == key)
+        return self.link_value("army", "legibility") >= t.needs
+
+    def _apply_tax_burden(self):
+        """Set each province's share of its wage taken by the state. Incidence differs
+        by tier, which is the whole point — the same revenue hurts different people."""
+        for p in self.provs:
+            if p.key in self.lost_provinces:
+                continue
+            b = 0.0
+            b += self.tax["excise"] * 0.30 * (1.25 - 0.5 * p.bourgeoisie)   # regressive
+            b += self.tax["land"] * 0.26 * (1.30 - p.bourgeoisie)           # the countryside
+            b += self.tax["income"] * 0.30 * (0.35 + p.bourgeoisie)         # where money is
+            p.tax_burden = max(0.0, min(0.72, b))
+
     def revenue(self) -> float:
+        """Excise on trade, plus whatever tiers the state can see well enough to levy."""
+        live = [p for p in self.provs if p.key not in self.lost_provinces]
+        if not live:
+            return 0.0
+        trade = sum(sum(p.capacity[g] for g in GOOD_KEYS) * (0.25 + p.bourgeoisie * 0.7)
+                    / max(0.5, p.freight() ** 0.4) for p in live)
+        scale = trade / 90.0
+        r = 0.0
+        for t in TAXES:
+            if not self.tax_available(t.key):
+                continue
+            rate = self.tax[t.key]
+            # each tier saturates: you cannot get everything by raising one lever
+            r += t.yield_per * scale * (1.0 - math.exp(-2.1 * rate))
+        return r * (0.7 + 0.3 * self.credit)
+
+    def _old_revenue(self) -> float:
         """Excise on trade — the cheap fiscal tier. You tax what moves, not what you cannot see."""
         r = 0.0
         for p in self.provs:

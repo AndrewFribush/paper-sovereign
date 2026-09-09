@@ -17,8 +17,9 @@ import sys, os
 import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from game.sim import (Game, LINES, LINE_BY_KEY, GOODS, GOOD_KEYS,
+from game.sim import (Game, LINES, LINE_BY_KEY, GOODS, GOOD_KEYS, TAXES,
                       price_of, welfare, LINK_NAMES, N_TURNS)
+from statistics import mean as st_mean
 
 W, H = 1280, 800
 INK        = (34, 30, 26)
@@ -53,6 +54,7 @@ class UI:
         self.detail = None
         self.politics = False
         self.ledger = False
+        self.exchequer = False
         self.intro = True
         self.crisis_btn: dict = {}
         self.btn: dict = {}
@@ -402,6 +404,60 @@ class UI:
         if missing:
             self.t(f"No return at all from: {', '.join(missing)}", x, y, self.f_sm, RED)
 
+    def draw_exchequer(self):
+        g = self.g
+        panel = pygame.Rect(24, 96, 654, 528)
+        pygame.draw.rect(self.screen, PARCH_DK, panel, border_radius=4)
+        pygame.draw.rect(self.screen, RULE, panel, 1, border_radius=4)
+        x, y = panel.x + 18, panel.y + 14
+        self.t("THE EXCHEQUER", x, y, self.f_h1, KNOWN)
+        self.tr("X to close", panel.right - 16, y + 12, self.f_sm, STALE)
+        y += 42
+        self.t("You cannot tax what you cannot see. Each instrument needs an apparatus first.",
+               x, y, self.f_sm, STALE)
+        y += 14
+        self.t(f"Revenue £{g.revenue():,.0f}", x, y + 10, self.f_h2, KNOWN)
+        self.t(f"legibility {g.link_value('army','legibility')*100:.0f}%",
+               x + 190, y + 16, self.f_sm, GOLD)
+        y += 46
+        self.tax_btn = {}
+        for t in TAXES:
+            ok = g.tax_available(t.key)
+            box = pygame.Rect(x, y, panel.width - 36, 112)
+            pygame.draw.rect(self.screen, PARCH if ok else (222, 214, 196), box, border_radius=3)
+            pygame.draw.rect(self.screen, RULE, box, 1, border_radius=3)
+            self.t(t.name, x + 14, y + 10, self.f_h2, KNOWN if ok else STALE)
+            if not ok:
+                self.t(f"unavailable — needs legibility {t.needs*100:.0f}%",
+                       x + 300, y + 16, self.f_sm, RED)
+            self.t(t.blurb, x + 14, y + 38, self.f_sm, STALE)
+            self.t(f"falls on {t.incidence}", x + 14, y + 56, self.f_sm,
+                   BELIEVED if ok else STALE)
+            rate = g.tax[t.key]
+            pygame.draw.rect(self.screen, PARCH_DK, (x + 14, y + 84, 300, 10), border_radius=2)
+            if ok:
+                pygame.draw.rect(self.screen, GOLD, (x + 14, y + 84, int(300 * rate), 10),
+                                 border_radius=2)
+            self.t(f"{rate*100:.0f}%", x + 326, y + 78, self.f, KNOWN if ok else STALE)
+            if ok:
+                minus = pygame.Rect(x + 380, y + 76, 30, 26)
+                plus = pygame.Rect(x + 416, y + 76, 30, 26)
+                for r, lab in ((minus, "-"), (plus, "+")):
+                    pygame.draw.rect(self.screen, PARCH_DK, r, border_radius=3)
+                    pygame.draw.rect(self.screen, RULE, r, 1, border_radius=3)
+                    self.t(lab, r.x + 11, r.y + 3, self.f, KNOWN)
+                self.tax_btn[("-", t.key)] = minus
+                self.tax_btn[("+", t.key)] = plus
+            y += 122
+
+        burden = st_mean([p.tax_burden for p in g.provs
+                          if p.key not in g.lost_provinces] or [0])
+        self.rule(x, panel.bottom - 66, panel.width - 36)
+        self.t(f"You are taking {burden*100:.0f}% of what your subjects earn.",
+               x, panel.bottom - 54, self.f, RED if burden > 0.4 else INK)
+        self.t("It is not available to them for bread. That is the whole trade.",
+               x, panel.bottom - 30, self.f_sm, STALE)
+
     def draw_politics(self):
         g = self.g
         panel = pygame.Rect(24, 96, 654, 528)
@@ -542,7 +598,7 @@ class UI:
             self.t(line, 30, y, self.f_sm, INK)
             y += 18
 
-        self.tr("F1 truth   T ledger   P politics   S/L save   click a province   ENTER end year", W - 30, H - 26,
+        self.tr("F1 truth   T ledger   X exchequer   P politics   S/L save   ENTER end year", W - 30, H - 26,
                 self.f_sm, STALE)
         if self.inspector:
             self.t("GROUND TRUTH  ·  red = simulation, not the state's belief", 30, H - 26, self.f_sm, TRUTH)
@@ -641,10 +697,11 @@ class UI:
                             return
                         continue
                     if e.key == pygame.K_ESCAPE:
-                        if self.detail or self.politics or self.ledger:
+                        if self.detail or self.politics or self.ledger or self.exchequer:
                             self.detail = None
                             self.politics = False
                             self.ledger = False
+                            self.exchequer = False
                             continue
                         return
                     if e.key == pygame.K_F1:
@@ -662,7 +719,10 @@ class UI:
                         self.detail = None; self.ledger = False
                     if e.key == pygame.K_t:
                         self.ledger = not self.ledger
-                        self.detail = None; self.politics = False
+                        self.detail = None; self.politics = False; self.exchequer = False
+                    if e.key == pygame.K_x:
+                        self.exchequer = not self.exchequer
+                        self.detail = None; self.politics = False; self.ledger = False
                     if self.g.game_over:
                         continue
                     if e.key in (pygame.K_DOWN, pygame.K_j):
@@ -694,6 +754,13 @@ class UI:
                                 if e.button == 1: self.step(25)
                                 if e.button == 3: self.step(-25)
                                 break
+                    elif self.exchequer:
+                        for (sign, tk), r in getattr(self, "tax_btn", {}).items():
+                            if r.collidepoint(mx, my):
+                                d = 0.05 if sign == "+" else -0.05
+                                self.g.tax[tk] = max(0.0, min(1.0, self.g.tax[tk] + d))
+                                self.g._apply_tax_burden()
+                                break
                     elif self.politics:
                         for (kind, hk), r in self.btn.items():
                             if r.collidepoint(mx, my):
@@ -724,6 +791,7 @@ class UI:
             else:
                 self.draw_header()
                 if self.politics: self.draw_politics()
+                elif self.exchequer: self.draw_exchequer()
                 elif self.ledger: self.draw_ledger()
                 elif self.detail: self.draw_detail()
                 else: self.draw_map()

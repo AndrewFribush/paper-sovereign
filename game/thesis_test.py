@@ -15,15 +15,15 @@ import statistics as st
 from game.sim import Game, N_TURNS
 
 STRATEGIES = {
-    "see first":     dict(census=.34, railway=.06, schools=.10, normal=.10, granary=.10, army=.30),
-    "build first":   dict(census=.05, railway=.35, schools=.10, normal=.05, granary=.15, army=.30),
-    "school first":  dict(census=.05, railway=.05, schools=.28, normal=.22, granary=.10, army=.30),
-    "guns only":     dict(census=.02, railway=.03, schools=.02, normal=.03, granary=.10, army=.80),
-    "old regime":    dict(census=.02, railway=.02, schools=.02, normal=.02, granary=.22, army=.30),
-    "balanced":      dict(census=.17, railway=.17, schools=.17, normal=.12, granary=.12, army=.25),
+    "see first":     dict(_tax=dict(excise=.40, land=.15), census=.34, railway=.06, schools=.10, normal=.10, granary=.10, army=.30),
+    "build first":   dict(_tax=dict(excise=.55, land=.25), census=.05, railway=.35, schools=.10, normal=.05, granary=.15, army=.30),
+    "school first":  dict(_tax=dict(excise=.35, land=.10), census=.05, railway=.05, schools=.28, normal=.22, granary=.10, army=.30),
+    "guns only":     dict(_tax=dict(excise=.90, land=.70), census=.02, railway=.03, schools=.02, normal=.03, granary=.10, army=.80),
+    "old regime":    dict(_tax=dict(excise=.15, land=.00), census=.02, railway=.02, schools=.02, normal=.02, granary=.22, army=.30),
+    "balanced":      dict(_tax=dict(excise=.45, land=.20), census=.17, railway=.17, schools=.17, normal=.12, granary=.12, army=.25),
     # Improvement of the land is the only instrument that touches what people eat, so
     # without a style that funds it the welfare axis is never exercised and reads flat.
-    "improving":     dict(census=.06, railway=.05, schools=.05, normal=.06, granary=.10, army=.24, land=.44),
+    "improving":     dict(_tax=dict(excise=.30, land=.10), census=.06, railway=.05, schools=.05, normal=.06, granary=.10, army=.24, land=.44),
 }
 
 AXES = ["literacy", "welfare", "treasury", "provinces", "census error", "register"]
@@ -32,11 +32,24 @@ AXES = ["literacy", "welfare", "treasury", "provinces", "census error", "registe
 def play(mix: dict, seed: int) -> dict:
     g = Game(seed)
     g.collect()
+    # copy, never mutate: the caller reuses this dict across every seed, and popping
+    # from it meant only the first run ever saw the tax settings.
+    mix = dict(mix)
+    tax = mix.pop("_tax", None)
+    if tax:
+        g.tax.update(tax)
+        g._apply_tax_burden()
     while not g.game_over:
+        if g.crisis:
+            g.choose(g.crisis.choices[0].key)
+            continue
+        if tax:
+            g.tax.update(tax)
         t = g.treasury
         for k, share in mix.items():
             g.budget[k] = t * share
         g.end_turn()
+        g.notice = []
         if not g.game_over:
             g.collect()
     err = abs(g.believed_pop() - g.true_pop()) / max(1e-6, g.true_pop())

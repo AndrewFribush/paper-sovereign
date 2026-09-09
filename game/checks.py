@@ -85,9 +85,10 @@ def invariants():
 def bounds():
     """What would have caught the runaway loop."""
     print("\nBOUNDS  (nothing may grow without limit)")
-    pops, inds, lits, treas = [], [], [], []
+    pops, inds, lits, treas, ALLS = [], [], [], [], []
     for seed in SEEDS:
         g, S = play(seed)
+        ALLS.append(S)
         pops.append(S[-1]["pop"] / S[0]["pop"])
         inds.append(S[-1]["industry"])
         lits.append(g.mean_literacy())
@@ -96,7 +97,14 @@ def bounds():
     check("industry stock stays bounded", max(inds) < 8.0, f"max {max(inds):.2f}")
     check("literacy stays plausible for the period", max(lits) < 0.60,
           f"max {max(lits)*100:.1f}%")
-    check("treasury does not diverge", max(treas) < 5000, f"max £{max(treas):,.0f}")
+    # Both ends. The max-only version passed a treasury of -1.7e180, produced when a
+    # negative balance flipped the sign of every appropriation.
+    lo = min(min(s["treasury"] for s in S) for S in ALLS)
+    check("treasury does not diverge", max(treas) < 5000 and lo >= -1e-6,
+          f"range £{lo:,.0f} to £{max(treas):,.0f}")
+    finite = all(s["treasury"] == s["treasury"] and abs(s["treasury"]) < 1e9
+                 for S in ALLS for s in S)
+    check("treasury stays finite", finite)
 
 
 def signal():
@@ -327,7 +335,7 @@ def thesis():
     for ax in AXES:
         sp = max(r[ax] for r in rows.values()) - min(r[ax] for r in rows.values())
         rel = sp / max(1e-6, abs(st.mean(r[ax] for r in rows.values())))
-        if ax == "welfare":
+        if False:   # welfare now has an extraction lever; strict threshold restored
             # Known weak axis. With the market integrated, food is distributed and every
             # strategy ends up feeding its people about equally. The design wants this to
             # be a real choice ("steel output and army size going up while real consumption
