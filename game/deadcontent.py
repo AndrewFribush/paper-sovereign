@@ -316,10 +316,17 @@ def thresholds():
             gate("riot: unrest > .78", any(p.unrest > 0.78 for p in live))
             gate("diagnose: 'dear' (1.45x)", any(price_of(p, "grain") > ref * 1.45 for p in live))
             gate("ui: province red (1.6x)", any(price_of(p, "grain") > ref * 1.6 for p in live))
-            gate("ui: belief stale (>12y)",
-                 any((o := g.beliefs.pop.get(p.key)) and o.age(g.year) > 12 for p in live))
-            gate("ui: belief ancient (>25y)",
-                 any((o := g.beliefs.pop.get(p.key)) and o.age(g.year) > 25 for p in live))
+            # As `any` these were true in 100% of years — fourteen provinces is fourteen
+            # chances for one belief to be old — and both carried a comment saying so.
+            # As a SHARE they measure the thickness of the fog, which is a real design
+            # quantity: measured, more than half the map is stale in the median year
+            # and it ranges from none to all of it.
+            def share(f):
+                return sum(1 for p in live if f(p)) / max(1, len(live))
+            gate("ui: over half the map's beliefs are stale (>12y)",
+                 share(lambda p: (o := g.beliefs.pop.get(p.key)) and o.age(g.year) > 12) > 0.50)
+            gate("ui: a third of the map's beliefs are ancient (>25y)",
+                 share(lambda p: (o := g.beliefs.pop.get(p.key)) and o.age(g.year) > 25) > 0.33)
             gate("sight: province invisible", any(p.bourgeoisie <= 0.15 for p in live))
             gate("nudge: consent binds 3+",
                  sum(1 for l in LINES if g.preview(l.key)[0] == "consent") >= 3)
@@ -354,10 +361,11 @@ def thresholds():
     # operating state, which is the thing the design forbids.
     EXEMPT_LOW = {"price: at ceiling", "price: at floor", "supply: clamped high",
                   "supply: clamped low (>15% of the market)"}
-    EXEMPT_HIGH = {"ui: belief stale (>12y)", "ui: belief ancient (>25y)",
-                   # at least one province has no merchant in almost every run, which
-                   # is the design working, not a gate that fails to gate
-                   "sight: province invisible"}
+    # `sight: province invisible` stays an `any`, and stays exempt, because unlike the
+    # other two it is genuinely constant: measured, the share of the map with no
+    # merchant runs 15.4%-21.4% across every playstyle and seed, so no threshold makes
+    # it a gate. It is a structural fact about the map, reported rather than tested.
+    EXEMPT_HIGH = {"sight: province invisible"}
     bad = []
     for name in sorted(tot):
         r = 100 * hits[name] / max(1, tot[name])
