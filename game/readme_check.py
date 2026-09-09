@@ -16,7 +16,7 @@ changes the number stops matching.
 """
 import os, statistics as st, sys
 
-from game.sim import Game, N_TURNS, price_of
+from game.sim import Game, GOODS, N_TURNS, price_of
 
 README = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "README.md")
 SEEDS = range(1, 9)
@@ -151,6 +151,31 @@ def main():
           r is not None and abs(r.spent - 24) <= 2
           and "no press in the province" in (r.friction or ""),
           f"£{r.spent:.0f} spent — {r.friction}" if r else "no result")
+
+    # docs/economy.md's central claim is that the supply response holds the market at
+    # its equilibrium. The number saying where it holds is therefore the one number in
+    # that document that must not drift, and it had: the paragraph said 13-15 against
+    # a reference of 10, from before the elasticities were derived. It is 10.7.
+    econ = open(os.path.join(os.path.dirname(README), "docs", "economy.md")).read()
+    covers, prices = [], []
+    mix = dict(census=.16, army=.26, railway=.13, granary=.13, normal=.13, schools=.10, land=.09)
+    for s in SEEDS:
+        g = Game(s); g.collect()
+        while not g.game_over:
+            if g.crisis: g.choose(g.crisis.choices[0].key); continue
+            t = g.treasury
+            for k, v in mix.items(): g.budget[k] = t * v
+            g.end_turn(); g.notice = []
+            if not g.game_over: g.collect()
+            live = [p for p in g.provs if p.key not in g.lost_provinces]
+            covers.append(st.mean(p.stocks["grain"] / max(1e-6, p.consumption("grain"))
+                                  for p in live) / GOODS["grain"].target_cover)
+            prices.append(st.mean(price_of(p, "grain") for p in live))
+    med_c, med_p = st.median(covers), st.median(prices)
+    check("the market still settles where economy.md says it settles",
+          "cover sits at **1.01 of target**" in econ and "**10.7 against a" in econ,
+          abs(med_c - 1.01) < 0.06 and abs(med_p - 10.7) < 0.8,
+          f"median cover {med_c:.2f} of target, median price {med_p:.1f}")
 
     # docs/engine-choice.md rests its whole recommendation on one measured number.
     # Absolute times are machine-dependent and have risen 35% as the simulation grew,
