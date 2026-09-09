@@ -231,6 +231,12 @@ def main():
     # choice that wins on every axis is a button. Both render identically. Forked from
     # the SAME state — the only honest way to compare choices, since a crisis reached
     # by different play is a different crisis.
+    # LIMITATION, stated because it bounds what a green result here means: these axes
+    # are material. They cannot see an EPISTEMIC cost. The dearth crisis's "fix the
+    # price" option stops your price returns for three years — you read a number the
+    # state set rather than one the country made — and that is the most interesting
+    # trade in the crisis and is invisible below. A crisis can pass this check and
+    # still be a bad decision; it cannot pass it and be a fake one.
     print("\nCRISIS CHOICES  (a choice that wins on every axis is not a choice)")
     import copy as _copy
     crisis_faults = []
