@@ -512,6 +512,20 @@ class Game:
             bias = 1.0 - min(0.55, p.base_freight * 0.20)      # remote => undercount
             noise = self.rng.uniform(0.93, 1.07)
             self.beliefs.pop[p.key] = Obs(p.pop * bias * noise, self.year - age, "survey")
+        # Merchants have been quoting all along — the state simply holds old returns.
+        # Without this the opening decision is made with no price data at all, which
+        # reads as an empty screen rather than as a state that cannot see.
+        for p in self.provs:
+            if p.bourgeoisie <= 0.15:
+                continue
+            age = self.rng.randint(1, 4)
+            for g in GOOD_KEYS:
+                drift = self.rng.uniform(0.82, 1.22)
+                self.beliefs.price[(p.key, g)] = Obs(price_of(p, g) * drift,
+                                                     self.year - age, "market")
+                self.beliefs.push(p.key, g, self.year - age, price_of(p, g) * drift)
+            self.beliefs.wage_hist.setdefault(p.key, []).append(
+                (self.year - age, wage_of(p)))
         self.log.append(f"{self.year}. You inherit a treasury, an army, and a map you did not draw.")
 
     # -- links ------------------------------------------------------------
