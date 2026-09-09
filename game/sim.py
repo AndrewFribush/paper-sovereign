@@ -1514,8 +1514,23 @@ class Game:
                 self.register_quality = min(1.0, self.register_quality + 0.075)
                 for p in self.provs: p.pop *= 0.985
                 self.unlocked.add("vital")
+                # A dominant choice needs a real cost, not a smaller benefit. Resizing
+                # the register grant did not stop the commission beating quarantine and
+                # inaction on welfare, order, legibility AND territory at once, because
+                # the grant was not where its advantage came from.
+                #
+                # The cost that belongs here is political, and it is the one the design
+                # already names: the parish register IS the register, and the clergy
+                # supply it. A crown commission sending its own men to count the dead in
+                # people's houses goes over their heads and says so. You are not buying
+                # legibility with money; you are taking it from the people who currently
+                # hold it, and they notice.
+                self.holder["clergy"].consent = max(0.0, self.holder["clergy"].consent - 0.14)
+                self.holder["nobles"].consent = max(0.0, self.holder["nobles"].consent - 0.07)
                 out = ["The commission reports. The mortality was worse than believed.",
-                       "It also leaves you a register of the dead — which is a register."]
+                       "It also leaves you a register of the dead — which is a register.",
+                       "The bishop observes that the parishes already kept one.",
+                       "  Consent falls: you counted them yourself."]
             else:
                 for p in self.provs: p.pop *= 0.965
                 out = ["You had neither the money nor the clerks. It ran its course."]
@@ -1540,6 +1555,15 @@ class Game:
         else:
             for p in self.provs: p.unrest = min(1.0, p.unrest + 0.12)
             out = ["Nothing was done. It passed, or it did not."]
+            if c.key == "cholera":
+                # Doing nothing in a plague killed NOBODY, so the cordon paid lives to
+                # prevent nothing and was strictly worse than ignoring it — a choice no
+                # player should ever take, which is dead content wearing a decision's
+                # clothes. Inaction is now the deadliest option, which is what makes
+                # the cordon's own mortality a price for something.
+                for p in self.provs: p.pop *= 0.958
+                out = ["Nothing was done. It ran through the towns and out again.",
+                       "Nobody counted them, so nobody can tell you what it cost."]
 
         if key != "none":
             self.crises_survived += 1

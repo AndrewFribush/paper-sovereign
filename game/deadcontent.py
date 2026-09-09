@@ -260,13 +260,13 @@ def main():
                 live = [p for p in f.provs if p.key not in f.lost_provinces] or f.provs
                 rows.setdefault(ch.key, []).append(
                     (f.mean_welfare(), f.treasury / 1000.0, -st.mean(p.unrest for p in live),
-                     f.register_quality, -len(f.lost_provinces)))
+                     f.register_quality, -len(f.lost_provinces), f.true_pop()))
             if len(next(iter(rows.values()))) >= 6:
                 break
         if not rows:
             print(f"    {kind}: never reached in this sweep")
             continue
-        means = {k: [st.mean(x[i] for x in v) for i in range(5)] for k, v in rows.items()}
+        means = {k: [st.mean(x[i] for x in v) for i in range(6)] for k, v in rows.items()}
         # "Best on every axis" is a condition no choice can meet — every option costs
         # money, so every option loses on cash — and a check that cannot fire is not a
         # check. Normalise each axis by its own spread across the choices, then ask the
@@ -278,7 +278,11 @@ def main():
         # thesis is that money is never the constraint — so cash is a price paid, not
         # an outcome traded. What is compared is what the choice DOES: welfare, order,
         # legibility, territory.
-        AXES = [0, 2, 3, 4]
+        # How many subjects survive is an outcome, not a footnote — it is the first
+        # number on the player's screen. Leaving it out made the cordon look strictly
+        # worse than letting the plague run, because the only thing the cordon buys is
+        # the thing the comparison could not see.
+        AXES = [0, 2, 3, 4, 5]
         norm = {}
         for i in AXES:
             lo = min(m[i] for m in means.values())
@@ -299,8 +303,32 @@ def main():
                 winner = k
                 break
         spread = max(abs(means[a][0] - means[b][0]) for a in means for b in means)
+        # The mirror of a dominant choice: one that is never better than some other
+        # option on anything. Quarantine became this the moment the commission stopped
+        # dominating — it paid lives to prevent a plague that killed nobody if ignored,
+        # which is dead content wearing a decision's clothes. A check that only looks
+        # for a winner cannot see it.
+        # Mirrors the winner test rather than demanding a clear gap on every axis:
+        # requiring 0.10 everywhere missed quarantine being beaten by inaction, because
+        # one of the four axes differed by only 0.07 while another differed by the whole
+        # range. Beaten means: some option is never meaningfully worse, and is much
+        # better somewhere.
+        loser = None
+        for k in norm:
+            for o in norm:
+                if o == k:
+                    continue
+                if (all(norm[o][i] >= norm[k][i] - 0.05 for i in AXES)
+                        and any(norm[o][i] >= norm[k][i] + 0.30 for i in AXES)):
+                    loser = k
+                    break
+            if loser:
+                break
         print(f"    {kind:10} {len(means)} choices, welfare spread {spread*100:.2f} points"
-              + (f"  <-- '{winner}' wins on every axis" if winner else ""))
+              + (f"  <-- '{winner}' wins on every axis" if winner else "")
+              + (f"  <-- '{loser}' is beaten on every axis" if loser else ""))
+        if loser:
+            crisis_faults.append(f"'{loser}' is never worth taking in the {kind} crisis")
         if winner:
             # Recorded rather than failed, and only for the one crisis where the cause
             # is understood and is somewhere else: the commission wins on welfare
@@ -308,11 +336,7 @@ def main():
             # raises measured welfare (see the known open finding in checks.py —
             # capacity does not scale with the workforce). Fixing that is likely to
             # fix this. Any OTHER crisis developing a dominant choice is a real fault.
-            if kind == "cholera" and winner == "commission":
-                print("      (known open finding: downstream of welfare rising when "
-                      "population falls — see BUILD-LOG)")
-            else:
-                crisis_faults.append(f"'{winner}' dominates the {kind} crisis")
+            crisis_faults.append(f"'{winner}' dominates the {kind} crisis")
         if spread * 100 < 0.35:
             crisis_faults.append(f"the {kind} crisis choices are interchangeable")
             print(f"      <-- the choices are interchangeable")
