@@ -188,6 +188,29 @@ def main():
           "O(n^2.0" in engine, 1.9 <= exponent <= 2.25,
           f"measured O(n^{exponent:.2f}); the port advice rests on this being ~2")
 
+    # The BUILD-LOG's summary table states how many assertions each harness makes,
+    # and that table had drifted within an hour of being written. Count them.
+    import subprocess
+    log = open(os.path.join(os.path.dirname(README), "docs", "BUILD-LOG.md")).read()
+    counted = {}
+    for mod in ("checks", "inputs"):
+        # verify.sh has already run these and exports what each asserted; re-running
+        # them here cost sixteen seconds on every verification for no new information.
+        env = os.environ.get(f"VICKY_COUNT_{mod}")
+        if env and env.isdigit():
+            counted[mod] = int(env)
+            continue
+        r = subprocess.run([sys.executable, "-m", f"game.{mod}"],
+                           capture_output=True, text=True)
+        counted[mod] = sum(1 for l in r.stdout.split("\n")
+                           if l.startswith("  PASS") or l.startswith("  FAIL"))
+    stated_ok = (f"{counted['checks']} assertions over 20 seeds" in log
+                 and f"{counted['inputs']} assertions that the controls" in log)
+    check("the BUILD-LOG states the right number of assertions",
+          True, stated_ok,
+          f"checks makes {counted['checks']}, inputs makes {counted['inputs']}"
+          + ("" if stated_ok else " — the summary table says otherwise"))
+
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED: " + ", ".join(FAILS))
