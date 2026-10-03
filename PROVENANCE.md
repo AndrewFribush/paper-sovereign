@@ -14,4 +14,4 @@ The packaging adaptations are:
 - The screenshots come from the renamed game's existing `game.shots` renderer.
 - A GitHub Actions workflow installs the pinned dependency and runs the default verification. Its actions are pinned to commit SHAs and its token has read-only contents permission.
 
-Some source comments refer to numbered sections of the original design notes; those full notes are not included. Raw conversations, transcripts, private research and business plans, local tool settings, saved games, and development Git history are excluded. The package includes no external game's code or assets.
+Some source comments refer to numbered sections of the original design notes; those full notes are not included. Selected development history for the twelve game files is included; [HISTORY.md](HISTORY.md) describes its scope and original dates. Raw conversations, transcripts, private research and business plans, local tool settings, and saved games are excluded. The package includes no external game's code or assets.

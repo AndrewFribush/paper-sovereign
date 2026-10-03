@@ -68,3 +68,5 @@ The [packaging verification record](VERIFICATION.md) includes the local results 
 This is a playable prototype with a fixed map and twenty annual turns. The pairwise market calculation grows roughly quadratically, so the current implementation is not suitable for the larger maps contemplated during development. Heavy land-improvement spending can pin unrest at its maximum; the regression suite records that unresolved behavior explicitly.
 
 See the short notes on [the economy](docs/economy.md), [scaling](docs/engine-choice.md), and [verification](docs/BUILD-LOG.md). [Provenance](PROVENANCE.md) records the package's origin and adaptations. Rights are reserved under [NOTICE](NOTICE).
+
+[Development history](HISTORY.md) preserves the original game commits, including the earlier Vicky name.
