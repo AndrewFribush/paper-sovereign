@@ -1,0 +1,279 @@
+PAPER SOVEREIGN — full verification
+
+═══ CORRECTNESS  (invariants, bounds, mechanism) ═══
+Paper Sovereign regression checks — 20 seeds, 20 turns, 7 budget lines
+
+INVARIANTS  (economy.md §9 — guarantees, not targets)
+  PASS  stock never negative   0 violations
+  PASS  price always within its clamp   0 violations
+  PASS  no NaN prices   0 violations
+
+BOUNDS  (nothing may grow without limit)
+  PASS  population grows < 2x over the run   max 1.12x
+  PASS  industry stock stays bounded   max 1.73
+  PASS  literacy stays plausible for the period   max 23.6%
+  PASS  treasury does not diverge   range £13 to £658
+  PASS  treasury stays finite
+
+LINKS AND SCARCITY  (a link at its cap, or money that is never short)
+  PASS  no link spends most of a run near its cap   worst is None at 0% of line-years above 0.90
+  PASS  no link is both high and inert   none
+  PASS  money stays scarce   mean treasury is 1.8x mean revenue
+  PASS  money is rarely the binding link   0% of line-years
+
+SIGNAL  (the player must be able to read a spread)
+  PASS  grain rarely pinned to the ceiling   0.0% of province-years
+  PASS  no good sits on a clamp as an operating state   worst is iron at 5.1% of province-years
+  PASS  price spread usually informative   flat in 0% of years
+  PASS  median spread is large enough to diagnose   median 2.7x
+
+WELFARE  (two gates, worse binds — must not saturate or bottom out)
+  PASS  welfare not saturated at 1.0   0.0% pinned
+  PASS  welfare not collapsed at 0   0.0% at zero
+  PASS  welfare median in a governable band   median 0.74
+  PASS  welfare responds to price, not only to stock   raising a province's grain price must lower its welfare
+
+CONSERVATION
+  PASS  no good gains more than a year's production in a year
+
+MECHANISM  (the reason the number moved must be checked too)
+  PASS  railway spending actually builds lines   6.0 vs 0.0
+  PASS  and the line lowers freight between what it connects   2.06 vs 3.07
+  PASS  and the lower freight reaches the price level   excess over parity 122.0% vs 190.2%
+  PASS  the market settles to the freight bound   0 pairs left profitable after settlement
+  PASS  funding the census sharpens the state's belief   7.0% vs 30.7% error (ratio 0.23)
+  PASS  the census sees further than the muster roll   army-only 35% vs census 95%
+  PASS  override destroys the apparatus immediately   register 50% -> 15%
+  PASS  and timing dominates the decision   never 38%  early 32%  late 20%
+
+THESIS  (design §21)
+  PASS  no strategy dominates on every axis   []
+  PASS  strategies differ on literacy   spread 4.3
+  PASS  strategies differ on welfare   spread 24.7
+  PASS  strategies differ on treasury   spread 339.4
+  PASS  strategies differ on provinces   spread 2.1
+  PASS  strategies differ on census error   spread 23.5
+  PASS  strategies differ on register   spread 54.7
+
+PERSISTENCE
+  PASS  save/load roundtrips exactly
+  PASS  a loaded game resumes
+
+UI SMOKE
+  PASS  every panel renders for a whole run   104 panel draws
+
+POPULATION AND OUTPUT  (a plague is a bump, then a loss)
+  PASS  the population grows, so every count starts going stale   x1.085 over twelve years
+  PASS  a plague is a short-run windfall, as it should be   +12.12 points in the year it happens
+  PASS  and the windfall does not last   -1.10 points averaged over the following years
+  PASS  losing a quarter of the people costs the exchequer   revenue -24.9%
+
+BELIEF LAYERS  (several, unreconciled, differently wrong)
+  PASS  the state holds more than two kinds of number for the same fact   sources: census, registrar, survey
+  PASS  no source is both the freshest and the most accurate   freshest is registrar (1.9y), truest is census (6.1% out)
+  PASS  and they differ on both latency and bias, not just one   25.4 years apart, 20.8 points apart
+
+RELIEF  (the lever the design singles out must be worth pulling)
+  PASS  relieving a dearth buys political quiet   sedition crises 0.80 -> 0.50 per run
+  PASS  and it is paid for, so it is a trade and not a free win   welfare 75.5% -> 73.0%
+
+KNOWN OPEN FINDINGS  (measured, recorded, pinned so they cannot worsen)
+  OPEN  unrest must not sit on its clamp, even under heavy enclosure   mean unrest reaches 1.000 at 80% of the budget on the land
+
+1 KNOWN OPEN FINDING(S), recorded in BUILD-LOG: unrest must not sit on its clamp, even under heavy enclosure
+all checks passed
+
+═══ CONTENT  (is any of it reachable?) ═══
+Dead-content sweep — 7 styles x 8 seeds
+
+  style         lines>50%  cats  crises  lost  dominant binds
+  seeing              6.0   3.0     2.6   2.1  agents, consent
+  building            5.0   0.0     3.1   2.0  consent, agents
+  schooling           5.0   0.0     2.4   2.0  agents, substrate
+  soldiering          6.0   0.5     2.4   0.0  agents, consent
+  feeding             5.0   0.0     2.9   2.0  consent, agents
+  old regime          5.0   0.0     2.6   2.0  agents, substrate
+  political           5.0   1.0     3.0   2.1  agents, substrate
+
+UNREACHABLE  (nothing here should be permanently out of the player's grasp)
+  nothing unreachable
+
+  CONSTRAINED  (usable, and permanently held below full throughput)
+    Schools: peaks at 49%, held by substrate  — but its own funding lifts substrate by 56%, so it bootstraps
+
+CRISIS CHOICES  (a choice that wins on every axis is not a choice)
+    dearth     4 choices, welfare spread 0.55 points
+    cholera    3 choices, welfare spread 3.13 points
+    sedition   3 choices, welfare spread 2.05 points
+
+ENDINGS  (an ending nobody can reach is a page nobody reads)
+  6 of 6 endings reached across 7 styles, 4 seeds, with and without breaking the settlement
+      20  You broke what stood in your way and found nothing behind it
+      12  They are fed and housed
+       9  20 years
+       8  Nobody obstructs you now
+       4  You can see your own country
+       3  They can read
+
+DIAGNOSIS  (the explanatory layer is the game — does it say anything?)
+  7,395 province-years, 54% carry a reading, 37 distinct diagnoses
+     30.3%  The magistrates report the district disturbed.
+     30.2%  No return from this province. Nothing to read.
+     11.8%  Grain is dear everywhere: a general harvest failure, not a local one. / Wages have not m
+      7.6%  Grain is dear everywhere: a general harvest failure, not a local one. / Wages have not m
+      2.8%  Grain is dear HERE and not elsewhere — a local failure, or the road is cut. / Freight fr
+
+WALLPAPER  (a message the player stops reading is worse than none)
+  no message fires in more than 45% of years
+         'A cold, wet year' 15%
+         'The neighbour is drilling' 12%
+         'A pastoral letter warns against th' 12%
+         'WAR' 10%
+
+THRESHOLDS  (0% is dead content; 100% means the gate is not a gate)
+   85.0%  crisis: cholera cond
+    8.8%  crisis: dearth cond
+   88.3%  crisis: sedition cond
+   89.6%  diagnose: 'dear' (1.45x)
+   46.2%  nudge: consent binds 3+
+    0.0%  price: at ceiling  (backstop, correctly never reached)
+   54.6%  price: at floor
+   75.0%  riot: unrest > .78
+  100.0%  sight: province invisible  (per-province styling; aggregate is 100% by construction)
+   35.4%  supply: clamped high
+    0.0%  supply: clamped low (>15% of the market)  (backstop, correctly never reached)
+   81.2%  ui: a third of the map's beliefs are ancient (>25y)
+   95.8%  ui: over half the map's beliefs are stale (>12y)
+   68.8%  ui: province red (1.6x)
+   10.4%  welfare: below .5
+
+  every gate fires sometimes and not always
+
+LINKS  (a link that saturates has stopped existing; one that never rises is a wall)
+  link            yr1    yr5   yr10   yr20   sat%  binds%
+  agents         0.54   0.58   0.60   0.64     0%   30.6%
+  reach          0.78   0.78   0.80   0.83     0%   14.3%
+  consent        0.70   0.67   0.60   0.40     0%   22.0%
+  legibility     0.27   0.33   0.34   0.37     0%   13.9%
+  compliance     0.60   0.61   0.61   0.63     0%    1.8%
+  substrate      0.53   0.73   0.66   0.33     0%   17.4%
+
+  every link moves across a run and none is stuck at its cap
+
+nothing dead, nothing saturated, nothing wallpaper
+
+═══ ROBUSTNESS  (degenerate and adversarial play) ═══
+ADVERSARIAL PLAY
+
+  PASS  spend nothing at all   12 seeds clean
+  PASS  everything on one line   12 seeds clean
+  PASS  all lines, all treasury   12 seeds clean
+  PASS  budget beyond the treasury   12 seeds clean
+  PASS  every tax at maximum   12 seeds clean
+  PASS  no tax at all   12 seeds clean
+  PASS  break everything in year 1   12 seeds clean
+  PASS  save and reload every year   12 seeds clean
+  PASS  random budget every year   12 seeds clean
+  PASS  relieve everywhere, always   12 seeds clean
+
+DOMINANCE  (an extreme should be good at one thing and bad at others)
+    all army     welf  66.8  lit  20.9  prov 14.0  seen  68.7  cash   196
+    all census   welf  75.6  lit  21.3  prov 11.9  seen  95.8  cash    98
+    all schools  welf  77.5  lit  29.3  prov 12.0  seen  69.1  cash    65
+    all land     welf  81.3  lit  21.4  prov 11.8  seen  68.8  cash   925
+    all rail     welf  78.5  lit  21.6  prov 12.0  seen  69.0  cash    62
+    hoard        welf  76.5  lit  21.3  prov 12.0  seen  69.1  cash  3344
+  PASS  no extreme dominates every axis   []
+
+survived everything
+
+═══ INPUT  (do the controls do what they say?) ═══
+INPUT  (the handlers, driven as a player drives them)
+  PASS  the brief does not advance on an unrelated key
+  PASS  ENTER leaves the brief
+  PASS  ledger opens and closes
+  PASS  politics opens and closes
+  PASS  exchequer opens and closes
+  PASS  F1 shows the truth
+  PASS  DOWN selects the next line
+  PASS  RIGHT appropriates to the selected line   +£25
+  PASS  SHIFT moves in larger steps   +£100 vs +£25
+  PASS  LEFT takes it back
+  PASS  UP selects the previous line
+  PASS  clicking a province opens it   'blackm' vs 'blackm'
+  PASS  clicking away closes it
+  PASS  left-click appropriates, right-click withdraws   £0 -> £25 -> £0
+  PASS  an exchequer rate button raises its own rate
+  PASS  paying a veto-holder costs money and buys consent   (True, True)
+  PASS  S saves and L loads it back   1650 vs 1650
+  PASS  a damaged save is refused without ending the run   5 of 5 refused
+  PASS  and a good save still loads after a bad one
+  PASS  a game can be copied, and the copy still refuses unknown budget lines   copied=True guarded=True
+  PASS  a whole game plays out through the handlers   27 events
+  PASS  crises answer to both the keyboard and the mouse   2 by key, 1 by click
+  PASS  ESC quits from the end screen
+
+every handler does what the interface says it does
+
+═══ INTERFACE  (does it fit on the screen?) ═══
+PANEL SHOTS -> <temporary directory>/
+  01-brief
+  02-map-year-1
+  03-map-year-4
+  03b-map-railed
+       (6 of 14 provinces railed)
+  04-province-detail
+  05-ledger
+  06-exchequer
+  07-politics
+  08-inspector
+  09-crisis-dearth
+  09-crisis-cholera
+  09-crisis-sedition
+  10-notice
+  11-end
+
+14 frames written
+
+LAYOUT  (nothing may be drawn outside the window)
+  every string lands inside the window
+
+═══ DOCS  (does the README still describe this game?) ═══
+DOCS  (are the claims in README.md and docs/ still true?)
+  PASS  the stated initial belief error   measured 16.3%, README says 16%
+  PASS  the province the README says you lose first   measured Highfell in 8 of 8 seeds
+  PASS  the three provinces that report nothing   Cauldfell, Highfell, Marshend
+  PASS  guns-only keeps the whole country and little else   holds 14, £197, literacy 20.9%
+  PASS  the railway closes the price spread by the stated amount   measured 3.76x -> 1.67x
+  PASS  the schools example spends what the README says, for the stated reason   £24 spent — there is no press in the province to print a primer
+  PASS  the market still settles where economy.md says it settles   median cover 1.00 of target, median price 10.7
+  PASS  the engine argument's exponent still holds   measured O(n^2.12); the port advice rests on this being ~2
+  PASS  the BUILD-LOG states the right number of assertions   checks makes 48, inputs makes 23
+  PASS  no harness measures the map against a size it stopped being   none hardcoded
+
+every number in the docs is one the game still produces
+
+═══ SCALING  (how far does this go?) ═══
+SCALING  (per simulated tick, single-threaded CPython)
+
+   provinces       tick     graph   economy    invest
+           8      0.6ms     0.2ms     0.4ms     0.0ms
+          24      5.7ms     0.9ms     4.7ms     0.0ms
+          64     42.8ms     6.1ms    36.5ms     0.2ms
+         160    262.3ms    34.2ms   227.7ms     0.3ms
+         400   1970.5ms   220.5ms  1749.3ms     0.8ms
+
+  measured growth ≈ O(n^2.09)
+
+  extrapolated to 3000 provinces: 132.64s per tick
+    yearly   ticks, 250 years:      9.2 hours of compute for one playthrough
+    monthly  ticks, 250 years:    110.5 hours of compute for one playthrough
+    weekly   ticks, 250 years:    479.0 hours of compute for one playthrough
+    daily    ticks, 250 years:   3362.0 hours of compute for one playthrough
+
+  A game is unplayable much above ~50ms per tick at the cadence the player
+  advances time. See docs/engine-choice.md — the sim is stdlib-only so the
+  port is transcription, not redesign.
+
+═══════════════════════════════════════
+ALL GREEN   (48s)
