@@ -2,7 +2,9 @@
 
 A government that cannot see its own country.
 
-You govern fourteen provinces for twenty years, starting in 1650. You choose what to fund, but schools need teachers, armies need muster rolls, and the institutions that supply them have interests of their own. Your population counts and price reports arrive late and can be wrong.
+You govern fourteen provinces for twenty years, starting in 1650. You choose what to fund, but schools need teachers, armies need muster rolls, and the institutions that supply them have interests of their own. Your population counts and price reports arrive late and can be wrong, despite looking satisfyingly official.
+
+The Python core keeps the country's true state separate from the government's dated observations. Delivery bottlenecks limit spending; a transport graph determines freight costs. Forty-eight regression assertions check mechanisms and invariants, and another twenty-three drive the real input handlers. Even the numbers in this README have to answer to the simulation.
 
 ![The opening year: reported population and prices beside the state budget](docs/images/game.png)
 
@@ -31,11 +33,11 @@ python3 -m venv .venv
 
 The [opening screen](docs/images/opening.png) explains the premise. A run ends after twenty years with an account of the state you built and what it still does not know.
 
-## What the simulation does
+## How it works
 
-The state holds dated observations of population, prices, and unrest. A separate simulation tracks the underlying values. Spending on a census changes the quality and reach of those observations; it also changes which taxes and institutions the state can support.
+The state holds dated observations of population, prices, and unrest while the simulation tracks the underlying values. Those two accounts are allowed to disagree. Spending on a census changes the quality and reach of the state's observations; it also changes which taxes and institutions the state can support. F1 exposes the true values so you can distinguish a design choice from a bug.
 
-Each budget line depends on a delivery chain. Its weakest link limits how much of an appropriation gets spent. Goods have stocks, production responds to prices, and a transport graph makes roads, rivers, ports, and railways matter to freight costs. Institutional consent can block an otherwise funded policy.
+Each budget line depends on a delivery chain whose weakest link limits how much of an appropriation gets spent. Goods have stocks, production responds to prices, and the transport graph gives roads, rivers, ports, and railways different freight costs. Institutional consent can block a policy even when the treasury can afford it.
 
 The documentation check remeasures these examples:
 
@@ -57,7 +59,7 @@ These are results of this fictional model and its test scenarios, not historical
 ./verify.sh --mutations
 ```
 
-Both commands run in disposable copies. They leave your saved game and source files alone. The default command runs seven existing checks; the optional mutation run injects twelve known regressions and reports which ones the suite detects. To inspect a particular check, its source and module entry point are in `game/`.
+Both commands run in disposable copies and leave your saved game and source files alone. The default command runs seven existing checks. The optional mutation run injects twelve known regressions into the simulation, one at a time, and reports which ones the suite detects. Each check's source and module entry point are in `game/`.
 
 The [packaging verification record](VERIFICATION.md) includes the local results and the checks that were not run.
 
